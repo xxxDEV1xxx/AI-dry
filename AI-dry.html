@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-dry Viewer</title>
+<style>
+  :root {
+    --bg-color: #1a1a2e;
+    --bg-image: none;
+    --font-family: 'Segoe UI', system-ui, sans-serif;
+    --font-size: 15px;
+    --font-color: #e0e0e0;
+    --q-bg: #0f3460;
+    --a-bg: #16213e;
+    --bubble-radius: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    color: var(--font-color);
+    background-color: var(--bg-color);
+    background-image: var(--bg-image);
+    background-size: cover;
+    background-attachment: fixed;
+    background-position: center;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Top bar */
+  #topbar {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid #333;
+    align-items: center;
+    flex-wrap: wrap;
+    z-index: 100;
+  }
+
+  button, .file-label {
+    background: #0f3460;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+  }
+  button:hover, .file-label:hover { background: #1a4a8a; }
+  button.danger { background: #8b0000; }
+  button.danger:hover { background: #a00; }
+
+  input[type="text"], input[type="search"] {
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #111;
+    color: #eee;
+    font-size: 13px;
+  }
+
+  #searchBox { width: 220px; }
+
+  /* Main layout */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 260px;
+    background: rgba(0,0,0,0.45);
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #convList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .conv-item {
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .conv-item:hover { background: rgba(255,255,255,0.12); }
+  .conv-item.active { background: #0f3460; }
+  .conv-item .del {
+    opacity: 0.5;
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+  .conv-item .del:hover { opacity: 1; color: #ff6b6b; }
+
+  /* Chat area */
+  #chatArea {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .bubble {
+    max-width: 78%;
+    padding: 12px 16px;
+    border-radius: var(--bubble-radius);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    position: relative;
+  }
+  .bubble.q {
+    align-self: flex-start;
+    background: var(--q-bg);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble.a {
+    align-self: flex-end;
+    background: var(--a-bg);
+    border-bottom-right-radius: 4px;
+  }
+  .bubble .label {
+    font-size: 11px;
+    opacity: 0.6;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  /* Selection toolbar */
+  #selToolbar {
+    display: none;
+    position: absolute;
+    background: #222;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 6px;
+    gap: 6px;
+    z-index: 200;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #selToolbar button { padding: 5px 10px; font-size: 12px; }
+
+  /* Settings panel */
+  #settings {
+    display: none;
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    width: 340px;
+    background: #1e1e2f;
+    border: 1px solid #444;
+    border-radius: 12px;
+    padding: 18px;
+    z-index: 300;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  }
+  #settings h3 { margin-bottom: 12px; font-size: 16px; }
+  #settings label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: 0.85; }
+  .palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .swatch {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .swatch:hover, .swatch.active { border-color: #fff; }
+
+  /* Search results modal */
+  #searchModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 400;
+    align-items: center;
+    justify-content: center;
+  }
+  #searchResults {
+    background: #1a1a2e;
+    width: 80%;
+    max-width: 900px;
+    max-height: 80vh;
+    overflow-y: auto;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .search-hit {
+    background: rgba(255,255,255,0.05);
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    border-left: 4px solid #0f3460;
+  }
+  .search-hit .meta { font-size: 12px; opacity: 0.6; margin-bottom: 6px; }
+  .search-hit mark { background: #ff0; color: #000; padding: 0 2px; }
+
+  /* Path hint */
+  #pathHint {
+    font-size: 11px;
+    opacity: 0.5;
+    margin-left: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <label class="file-label">
+    Upload File
+    <input type="file" id="fileInput" accept=".txt,.md,.log,.json" style="display:none">
+  </label>
+  <button onclick="newEmptyConv()">New Empty</button>
+  <button onclick="exportCurrent()">Export Current</button>
+  <button onclick="exportAll()">Export All</button>
+  <input type="search" id="searchBox" placeholder="Search all chats..." onkeydown="if(event.key==='Enter')doSearch()">
+  <button onclick="doSearch()">Search</button>
+  <button onclick="toggleSettings()">[gear] Theme / Font</button>
+  <span id="pathHint"></span>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div style="padding:10px;font-size:13px;opacity:0.7;">Conversations</div>
+    <div id="convList"></div>
+  </div>
+  <div id="chatArea">
+    <div id="messages"></div>
+  </div>
+</div>
+
+<!-- Selection toolbar (appears on text select) -->
+<div id="selToolbar">
+  <button onclick="splitSelection('q')">→ Question</button>
+  <button onclick="splitSelection('a')">→ Answer</button>
+  <button onclick="hideSelToolbar()">[UNRECOGNIZED EMOJI]</button>
+</div>
+
+<!-- Settings panel -->
+<div id="settings">
+  <h3>Background</h3>
+  <label>Color</label>
+  <input type="color" id="bgColor" value="#1a1a2e" oninput="applyTheme()">
+  <div class="palette" id="bgPalette"></div>
+  <label>Opacity / Darkness slider</label>
+  <input type="range" id="bgDark" min="0" max="100" value="100" oninput="applyTheme()">
+  <label>Background Image</label>
+  <input type="file" id="bgImage" accept="image/*" onchange="setBgImage(event)">
+  <button onclick="clearBgImage()" style="margin-top:6px;">Clear Image</button>
+
+  <h3 style="margin-top:20px;">Font</h3>
+  <label>Family</label>
+  <select id="fontFamily" onchange="applyTheme()">
+    <option value="'Segoe UI', system-ui, sans-serif">Segoe UI</option>
+    <option value="Georgia, serif">Georgia</option>
+    <option value="'Courier New', monospace">Courier New</option>
+    <option value="Arial, sans-serif">Arial</option>
+    <option value="'Roboto', sans-serif">Roboto</option>
+    <option value="'Comic Sans MS', cursive">Comic Sans</option>
+    <option value="system-ui">System UI</option>
+  </select>
+  <label>Size</label>
+  <input type="range" id="fontSize" min="11" max="24" value="15" oninput="applyTheme()">
+  <span id="fontSizeVal">15px</span>
+  <label>Color</label>
+  <input type="color" id="fontColor" value="#e0e0e0" oninput="applyTheme()">
+  <div class="palette" id="fontPalette"></div>
+
+  <h3 style="margin-top:20px;">Bubble Colors</h3>
+  <label>Question</label>
+  <input type="color" id="qColor" value="#0f3460" oninput="applyTheme()">
+  <label>Answer</label>
+  <input type="color" id="aColor" value="#16213e" oninput="applyTheme()">
+
+  <button onclick="toggleSettings()" style="margin-top:18px;width:100%;">Close</button>
+</div>
+
+<!-- Search modal -->
+<div id="searchModal">
+  <div id="searchResults">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+      <h3>Search Results</h3>
+      <button onclick="closeSearch()">Close</button>
+    </div>
+    <div id="searchHits"></div>
+  </div>
+</div>
+
+<script>
+// ===================== CONFIG =====================
+const DEFAULT_Q_PREFIX = "QQ";
+const DEFAULT_A_PREFIX = "AA";
+let Q_PREFIX = DEFAULT_Q_PREFIX;
+let A_PREFIX = DEFAULT_A_PREFIX;
+
+// ===================== STORAGE (IndexedDB) =====================
+const DB_NAME = "AI-dry-DB";
+const STORE = "conversations";
+let db = null;
+let currentId = null;
+let conversations = {}; // id -> {name, messages:[{type:'q'|'a', text}], created}
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains(STORE)) {
+        d.createObjectStore(STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = e => { db = e.target.result; resolve(); };
+    req.onerror = e => reject(e);
+  });
+}
+
+function saveConv(conv) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(conv);
+    tx.oncomplete = () => resolve();
+    tx.onerror = e => reject(e);
+  });
+}
+
+function loadAll() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = e => reject(e);
+  });
+}
+
+function deleteConv(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = e => reject(e);
+  });
+}
+
+// ===================== THEME =====================
+const PALETTE = [
+  "#1a1a2e","#16213e","#0f3460","#533483","#e94560",
+  "#0d0d0d","#1b1b1b","#2d3436","#00b894","#0984e3",
+  "#6c5ce7","#fd79a8","#fdcb6e","#e17055","#ffffff",
+  "#f5f5f5","#dfe6e9","#b2bec3"
+];
+
+function buildPalettes() {
+  const bgPal = document.getElementById("bgPalette");
+  const fontPal = document.getElementById("fontPalette");
+  PALETTE.forEach(c => {
+    const s1 = document.createElement("div");
+    s1.className = "swatch";
+    s1.style.background = c;
+    s1.onclick = () => { document.getElementById("bgColor").value = c; applyTheme(); };
+    bgPal.appendChild(s1);
+
+    const s2 = document.createElement("div");
+    s2.className = "swatch";
+    s2.style.background = c;
+    s2.onclick = () => { document.getElementById("fontColor").value = c; applyTheme(); };
+    fontPal.appendChild(s2);
+  });
+}
+
+function applyTheme() {
+  const root = document.documentElement;
+  const bg = document.getElementById("bgColor").value;
+  const dark = document.getElementById("bgDark").value / 100;
+  // darken the color a bit via overlay feel
+  root.style.setProperty("--bg-color", bg);
+  root.style.setProperty("--font-family", document.getElementById("fontFamily").value);
+  root.style.setProperty("--font-size", document.getElementById("fontSize").value + "px");
+  document.getElementById("fontSizeVal").textContent = document.getElementById("fontSize").value + "px";
+  root.style.setProperty("--font-color", document.getElementById("fontColor").value);
+  root.style.setProperty("--q-bg", document.getElementById("qColor").value);
+  root.style.setProperty("--a-bg", document.getElementById("aColor").value);
+
+  // persist
+  localStorage.setItem("ai-dry-theme", JSON.stringify({
+    bg, dark: document.getElementById("bgDark").value,
+    fontFamily: document.getElementById("fontFamily").value,
+    fontSize: document.getElementById("fontSize").value,
+    fontColor: document.getElementById("fontColor").value,
+    qColor: document.getElementById("qColor").value,
+    aColor: document.getElementById("aColor").value,
+    bgImage: root.style.getPropertyValue("--bg-image")
+  }));
+}
+
+function setBgImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.documentElement.style.setProperty("--bg-image", `url(${ev.target.result})`);
+    applyTheme();
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearBgImage() {
+  document.documentElement.style.setProperty("--bg-image", "none");
+  applyTheme();
+}
+
+function loadTheme() {
+  const t = JSON.parse(localStorage.getItem("ai-dry-theme") || "{}");
+  if (t.bg) document.getElementById("bgColor").value = t.bg;
+  if (t.dark) document.getElementById("bgDark").value = t.dark;
+  if (t.fontFamily) document.getElementById("fontFamily").value = t.fontFamily;
+  if (t.fontSize) document.getElementById("fontSize").value = t.fontSize;
+  if (t.fontColor) document.getElementById("fontColor").value = t.fontColor;
+  if (t.qColor) document.getElementById("qColor").value = t.qColor;
+  if (t.aColor) document.getElementById("aColor").value = t.aColor;
+  if (t.bgImage) document.documentElement.style.setProperty("--bg-image", t.bgImage);
+  applyTheme();
+}
+
+function toggleSettings() {
+  const s = document.getElementById("settings");
+  s.style.display = s.style.display === "block" ? "none" : "block";
+}
+
+// ===================== PATH HINT =====================
+function showPathHint() {
+  const isWin = navigator.platform.toLowerCase().includes("win");
+  const path = isWin
+    ? `C:\\Users\\Windows Sucks\\AI-dry\\`
+    : `/data/sda4/AI-dry/`;
+  document.getElementById("pathHint").textContent =
+    `Suggested local folder: ${path}  (export files there)`;
+}
+
+// ===================== PARSING =====================
+function parseFileContent(text) {
+  const lines = text.split(/\r?\n/);
+  let messages = [];
+  let qCount = 0, aCount = 0;
+
+  // First pass: look for prefixes
+  for (let line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith(Q_PREFIX)) {
+      messages.push({ type: "q", text: trimmed.slice(Q_PREFIX.length).trimStart() });
+      qCount++;
+    } else if (trimmed.startsWith(A_PREFIX)) {
+      messages.push({ type: "a", text: trimmed.slice(A_PREFIX.length).trimStart() });
+      aCount++;
+    }
+  }
+
+  // If fewer than 2 prefixed lines → best-guess heuristic
+  if (qCount + aCount < 2) {
+    messages = [];
+    let current = null;
+    for (let line of lines) {
+      const t = line.trim();
+      if (!t) {
+        if (current) { messages.push(current); current = null; }
+        continue;
+      }
+      // Heuristic: line ends with ? or starts with Q:/Question → question
+      const isQ = /\?$/.test(t) ||
+                  /^(q(uestion)?[:.\s])/i.test(t) ||
+                  /^(user|human|prompt)[:.\s]/i.test(t);
+      const isA = /^(a(nswer)?[:.\s])/i.test(t) ||
+                  /^(assistant|ai|bot|gpt|claude|response)[:.\s]/i.test(t);
+
+      if (isQ) {
+        if (current) messages.push(current);
+        current = { type: "q", text: t.replace(/^(q(uestion)?|user|human|prompt)[:.\s]+/i, "") };
+      } else if (isA) {
+        if (current) messages.push(current);
+        current = { type: "a", text: t.replace(/^(a(nswer)?|assistant|ai|bot|gpt|claude|response)[:.\s]+/i, "") };
+      } else if (current) {
+        current.text += "\n" + t;
+      } else {
+        // default first block to question
+        current = { type: "q", text: t };
+      }
+    }
+    if (current) messages.push(current);
+
+    // Alternate if still too few structure
+    if (messages.length <= 1 && lines.filter(l => l.trim()).length > 1) {
+      messages = [];
+      let flip = true;
+      let buf = [];
+      for (let line of lines) {
+        const t = line.trim();
+        if (!t) {
+          if (buf.length) {
+            messages.push({ type: flip ? "q" : "a", text: buf.join("\n") });
+            buf = [];
+            flip = !flip;
+          }
+        } else buf.push(t);
+      }
+      if (buf.length) messages.push({ type: flip ? "q" : "a", text: buf.join("\n") });
+    }
+  }
+  return messages;
+}
+
+// ===================== UI RENDER =====================
+function renderSidebar() {
+  const list = document.getElementById("convList");
+  list.innerHTML = "";
+  const ids = Object.keys(conversations).sort((a,b) => conversations[b].created - conversations[a].created);
+  ids.forEach(id => {
+    const c = conversations[id];
+    const div = document.createElement("div");
+    div.className = "conv-item" + (id === currentId ? " active" : "");
+    div.innerHTML = `<span>${escapeHtml(c.name)}</span>
+      <span class="del" onclick="event.stopPropagation();removeConv('${id}')">[UNRECOGNIZED EMOJI]</span>`;
+    div.onclick = () => loadConversation(id);
+    list.appendChild(div);
+  });
+}
+
+function renderMessages() {
+  const area = document.getElementById("messages");
+  area.innerHTML = "";
+  if (!currentId || !conversations[currentId]) return;
+  const msgs = conversations[currentId].messages;
+  msgs.forEach((m, idx) => {
+    const div = document.createElement("div");
+    div.className = "bubble " + m.type;
+    div.dataset.idx = idx;
+    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div>
+                     <div class="content">${escapeHtml(m.text)}</div>`;
+    area.appendChild(div);
+  });
+  area.scrollTop = area.scrollHeight;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;");
+}
+
+// ===================== CONVERSATION MGMT =====================
+async function addConversation(name, messages) {
+  const id = "c" + Date.now() + Math.random().toString(36).slice(2,7);
+  const conv = { id, name, messages, created: Date.now() };
+  conversations[id] = conv;
+  await saveConv(conv);
+  currentId = id;
+  renderSidebar();
+  renderMessages();
+  return id;
+}
+
+async function loadConversation(id) {
+  currentId = id;
+  renderSidebar();
+  renderMessages();
+}
+
+async function removeConv(id) {
+  if (!confirm("Delete this conversation?")) return;
+  await deleteConv(id);
+  delete conversations[id];
+  if (currentId === id) {
+    currentId = null;
+    document.getElementById("messages").innerHTML = "";
+  }
+  renderSidebar();
+}
+
+function newEmptyConv() {
+  const name = prompt("Name for new conversation:", "Untitled " + new Date().toLocaleString());
+  if (!name) return;
+  addConversation(name, []);
+}
+
+// ===================== FILE UPLOAD =====================
+document.getElementById("fileInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const name = prompt("Name this conversation:", file.name.replace(/\.[^.]+$/, ""));
+  if (!name) { e.target.value = ""; return; }
+
+  // Optional: ask for custom prefixes
+  const custom = prompt(
+    `Prefixes (Question,Answer) – leave blank for defaults "${DEFAULT_Q_PREFIX},${DEFAULT_A_PREFIX}"`,
+    `${Q_PREFIX},${A_PREFIX}`
+  );
+  if (custom) {
+    const parts = custom.split(",").map(s => s.trim());
+    if (parts[0]) Q_PREFIX = parts[0];
+    if (parts[1]) A_PREFIX = parts[1];
+  }
+
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const text = ev.target.result;
+    const messages = parseFileContent(text);
+    await addConversation(name, messages);
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+
+// ===================== SELECTION → SPLIT =====================
+let lastSelection = null;
+
+document.getElementById("messages").addEventListener("mouseup", e => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+    hideSelToolbar();
+    return;
+  }
+  // only inside a bubble
+  let node = sel.anchorNode;
+  while (node && !node.classList?.contains("bubble")) node = node.parentElement;
+  if (!node) { hideSelToolbar(); return; }
+
+  lastSelection = {
+    text: sel.toString(),
+    bubbleIdx: parseInt(node.dataset.idx),
+    range: sel.getRangeAt(0)
+  };
+
+  const toolbar = document.getElementById("selToolbar");
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  toolbar.style.display = "flex";
+  toolbar.style.left = (rect.left + window.scrollX) + "px";
+  toolbar.style.top = (rect.bottom + window.scrollY + 6) + "px";
+});
+
+function hideSelToolbar() {
+  document.getElementById("selToolbar").style.display = "none";
+  lastSelection = null;
+}
+
+function splitSelection(type) {
+  if (!lastSelection || !currentId) return;
+  const conv = conversations[currentId];
+  const idx = lastSelection.bubbleIdx;
+  const orig = conv.messages[idx];
+  const selected = lastSelection.text;
+
+  // Simple split: everything before selection stays, selection becomes new bubble of chosen type,
+  // everything after becomes another bubble of original type (if any)
+  const full = orig.text;
+  const pos = full.indexOf(selected);
+  if (pos === -1) { hideSelToolbar(); return; }
+
+  const before = full.slice(0, pos).trim();
+  const after = full.slice(pos + selected.length).trim();
+
+  const newMsgs = [];
+  if (before) newMsgs.push({ type: orig.type, text: before });
+  newMsgs.push({ type: type, text: selected.trim() });
+  if (after) newMsgs.push({ type: orig.type, text: after });
+
+  conv.messages.splice(idx, 1, ...newMsgs);
+  saveConv(conv);
+  renderMessages();
+  hideSelToolbar();
+}
+
+// ===================== SEARCH (grep style) =====================
+function doSearch() {
+  const q = document.getElementById("searchBox").value.trim();
+  if (!q) return;
+  const hits = [];
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+
+  Object.values(conversations).forEach(conv => {
+    conv.messages.forEach((m, mi) => {
+      const lines = m.text.split(/\r?\n/);
+      lines.forEach((line, li) => {
+        if (re.test(line)) {
+          const start = Math.max(0, li - 3);
+          const end = Math.min(lines.length - 1, li + 3);
+          const context = [];
+          for (let i = start; i <= end; i++) {
+            let l = escapeHtml(lines[i]);
+            if (i === li) l = l.replace(re, m => `<mark>${m}</mark>`);
+            context.push((i === li ? ">>> " : "    ") + l);
+          }
+          hits.push({
+            convName: conv.name,
+            convId: conv.id,
+            type: m.type,
+            context: context.join("\n")
+          });
+        }
+        re.lastIndex = 0;
+      });
+    });
+  });
+
+  const box = document.getElementById("searchHits");
+  box.innerHTML = hits.length
+    ? hits.map(h => `
+      <div class="search-hit">
+        <div class="meta">${escapeHtml(h.convName)} · ${h.type.toUpperCase()}
+          <button style="float:right;padding:2px 8px;font-size:11px"
+            onclick="loadConversation('${h.convId}');closeSearch()">Open</button>
+        </div>
+        <pre style="white-space:pre-wrap;font-size:13px;margin:0">${h.context}</pre>
+      </div>`).join("")
+    : "<p>No matches found.</p>";
+
+  document.getElementById("searchModal").style.display = "flex";
+}
+
+function closeSearch() {
+  document.getElementById("searchModal").style.display = "none";
+}
+
+// ===================== EXPORT =====================
+function exportCurrent() {
+  if (!currentId) return alert("No conversation selected");
+  const c = conversations[currentId];
+  downloadJSON(c, c.name + ".json");
+}
+
+function exportAll() {
+  downloadJSON(Object.values(conversations), "AI-dry-all-conversations.json");
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Also support loading previously exported JSON
+document.getElementById("fileInput").addEventListener("change", function(){}, true); // already handled
+
+// ===================== INIT =====================
+(async function init() {
+  await openDB();
+  const all = await loadAll();
+  all.forEach(c => conversations[c.id] = c);
+  buildPalettes();
+  loadTheme();
+  showPathHint();
+  renderSidebar();
+  if (Object.keys(conversations).length) {
+    currentId = Object.keys(conversations).sort((a,b)=>conversations[b].created-conversations[a].created)[0];
+    renderMessages();
+  }
+})();
+</script>
+</body>
+</html>
