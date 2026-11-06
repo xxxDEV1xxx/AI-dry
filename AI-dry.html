@@ -228,6 +228,14 @@
   .search-hit .meta { font-size: 12px; opacity: 0.6; margin-bottom: 6px; }
   .search-hit mark { background: #ff0; color: #000; padding: 0 2px; }
 
+  .bubble.sel { outline: 3px solid #ffd54f; filter: brightness(1.4); }
+  body.selmode .bubble { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .bubble .tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .bubble .tools button { padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.12); }
+  .bubble textarea { width: 100%; min-width: 300px; min-height: 120px; background: #111; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 8px; font: inherit; }
+  #ctxMenu { display: none; position: fixed; background: #222; border: 1px solid #555; border-radius: 8px; padding: 6px; z-index: 500; flex-direction: column; gap: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  #ctxMenu button { text-align: left; }
+
   /* Path hint */
   #pathHint {
     font-size: 11px;
@@ -246,6 +254,9 @@
   <button onclick="newEmptyConv()">New Empty</button>
   <button onclick="exportCurrent()">Export Current</button>
   <button onclick="exportAll()">Export All</button>
+  <button id="selModeBtn" onclick="toggleSelectMode()">Select Mode</button>
+  <button onclick="addBubble('q')">+ Question</button>
+  <button onclick="addBubble('a')">+ Answer</button>
   <input type="search" id="searchBox" placeholder="Search all chats..." onkeydown="if(event.key==='Enter')doSearch()">
   <button onclick="doSearch()">Search</button>
   <button onclick="toggleSettings()">[gear] Theme / Font</button>
@@ -267,6 +278,13 @@
   <button onclick="splitSelection('q')">→ Question</button>
   <button onclick="splitSelection('a')">→ Answer</button>
   <button onclick="hideSelToolbar()">[UNRECOGNIZED EMOJI]</button>
+</div>
+
+<div id="ctxMenu">
+  <button onclick="mergeSelected('q')">Merge → 1 Question</button>
+  <button onclick="mergeSelected('a')">Merge → 1 Answer</button>
+  <button class="danger" onclick="deleteSelected()">Delete selected</button>
+  <button onclick="clearSelection()">Clear selection</button>
 </div>
 
 <!-- Settings panel -->
@@ -474,19 +492,27 @@ function parseFileContent(text) {
   const lines = text.split(/\r?\n/);
   let messages = [];
   let qCount = 0, aCount = 0;
-
-  // First pass: look for prefixes
+  // First pass: consecutive QQ lines -> one question, consecutive AA lines -> one answer
+  let cur = null;
   for (let line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (trimmed.startsWith(Q_PREFIX)) {
-      messages.push({ type: "q", text: trimmed.slice(Q_PREFIX.length).trimStart() });
-      qCount++;
-    } else if (trimmed.startsWith(A_PREFIX)) {
-      messages.push({ type: "a", text: trimmed.slice(A_PREFIX.length).trimStart() });
-      aCount++;
+    let type = null, body = line;
+    if (trimmed.startsWith(Q_PREFIX)) { type = "q"; body = trimmed.slice(Q_PREFIX.length).trimStart(); qCount++; }
+    else if (trimmed.startsWith(A_PREFIX)) { type = "a"; body = trimmed.slice(A_PREFIX.length).trimStart(); aCount++; }
+
+    if (type && (!cur || cur.type !== type)) {
+      cur = { type, text: body };
+      messages.push(cur);
+    } else if (type) {
+      cur.text += "\n" + body;
+    } else if (cur) {
+      cur.text += "\n" + line;
+    } else if (trimmed) {
+      cur = { type: "q", text: line };
+      messages.push(cur);
     }
   }
+  messages.forEach(m => m.text = m.text.trim());
 
   // If fewer than 2 prefixed lines → best-guess heuristic
   if (qCount + aCount < 2) {
@@ -556,21 +582,24 @@ function renderSidebar() {
     list.appendChild(div);
   });
 }
-
+let lastRenderedId = null;
 function renderMessages() {
   const area = document.getElementById("messages");
+  const keep = area.scrollTop;
+  const same = lastRenderedId === currentId;
+  if (!same) selected.clear();
+  lastRenderedId = currentId;
   area.innerHTML = "";
   if (!currentId || !conversations[currentId]) return;
   const msgs = conversations[currentId].messages;
   msgs.forEach((m, idx) => {
     const div = document.createElement("div");
-    div.className = "bubble " + m.type;
+    div.className = "bubble " + m.type + (selected.has(idx) ? " sel" : "");
     div.dataset.idx = idx;
-    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div>
-                     <div class="content">${escapeHtml(m.text)}</div>`;
+    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div><div class="content">${escapeHtml(m.text)}</div><div class="tools"><button onclick="editBubble(${idx})">Edit</button><button onclick="addBubble('q',${idx})">+Q below</button><button onclick="addBubble('a',${idx})">+A below</button><button onclick="deleteBubble(${idx})">Del</button></div>`;
     area.appendChild(div);
   });
-  area.scrollTop = area.scrollHeight;
+  area.scrollTop = same ? keep : area.scrollHeight;
 }
 
 function escapeHtml(str) {
@@ -640,6 +669,104 @@ document.getElementById("fileInput").addEventListener("change", async e => {
   };
   reader.readAsText(file);
 });
+
+// ===================== MULTI-SELECT / MERGE / EDIT =====================
+let selectMode = false;
+let selected = new Set();
+let painting = null;
+const msgBox = document.getElementById("messages");
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  document.body.classList.toggle("selmode", selectMode);
+  document.getElementById("selModeBtn").textContent = selectMode ? "Select: ON" : "Select Mode";
+  if (!selectMode) { selected.clear(); renderMessages(); }
+}
+
+function setSel(b, on) {
+  const i = +b.dataset.idx;
+  on ? selected.add(i) : selected.delete(i);
+  b.classList.toggle("sel", on);
+}
+
+// click or click-drag across bubbles to highlight (Select Mode ON, or Ctrl/Shift+click)
+msgBox.addEventListener("mousedown", e => {
+  if (e.button !== 0 || e.target.closest("button, textarea")) return;
+  const b = e.target.closest(".bubble");
+  if (!b || !(selectMode || e.ctrlKey || e.shiftKey || e.metaKey)) return;
+  painting = !selected.has(+b.dataset.idx);
+  setSel(b, painting);
+});
+msgBox.addEventListener("mouseover", e => {
+  if (painting === null) return;
+  const b = e.target.closest(".bubble");
+  if (b) setSel(b, painting);
+});
+document.addEventListener("mouseup", () => { painting = null; });
+
+// right click / long-press menu
+msgBox.addEventListener("contextmenu", e => {
+  const b = e.target.closest(".bubble");
+  if (!b) return;
+  e.preventDefault();
+  if (!selected.has(+b.dataset.idx)) setSel(b, true);
+  const m = document.getElementById("ctxMenu");
+  m.style.display = "flex";
+  m.style.left = Math.min(e.clientX, window.innerWidth - 200) + "px";
+  m.style.top = Math.min(e.clientY, window.innerHeight - 190) + "px";
+});
+document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu")) hideCtx(); });
+function hideCtx() { document.getElementById("ctxMenu").style.display = "none"; }
+
+function mergeSelected(type) {
+  if (!currentId || !selected.size) return;
+  const conv = conversations[currentId];
+  const idxs = [...selected].sort((a, b) => a - b);
+  const text = idxs.map(i => conv.messages[i].text).join("\n");
+  conv.messages[idxs[0]] = { type, text };
+  for (let k = idxs.length - 1; k > 0; k--) conv.messages.splice(idxs[k], 1);
+  selected.clear(); saveConv(conv); renderMessages(); hideCtx();
+}
+
+function deleteSelected() {
+  if (!currentId || !selected.size) return;
+  if (!confirm("Delete " + selected.size + " selected box(es)?")) return;
+  const conv = conversations[currentId];
+  [...selected].sort((a, b) => b - a).forEach(i => conv.messages.splice(i, 1));
+  selected.clear(); saveConv(conv); renderMessages(); hideCtx();
+}
+
+function clearSelection() { selected.clear(); renderMessages(); hideCtx(); }
+
+function editBubble(i) {
+  const b = document.querySelector(`.bubble[data-idx="${i}"]`);
+  if (!b) return;
+  const m = conversations[currentId].messages[i];
+  b.querySelector(".content").innerHTML = `<textarea>${escapeHtml(m.text)}</textarea>`;
+  b.querySelector(".tools").innerHTML = `<button onclick="saveEdit(${i})">Save</button><button onclick="renderMessages()">Cancel</button>`;
+  b.scrollIntoView({ block: "center" });
+  b.querySelector("textarea").focus();
+}
+
+function saveEdit(i) {
+  const conv = conversations[currentId];
+  conv.messages[i].text = document.querySelector(`.bubble[data-idx="${i}"] textarea`).value;
+  saveConv(conv); renderMessages();
+}
+
+function deleteBubble(i) {
+  const conv = conversations[currentId];
+  conv.messages.splice(i, 1);
+  selected.clear(); saveConv(conv); renderMessages();
+}
+
+function addBubble(type, after) {
+  if (!currentId) return alert("No conversation selected");
+  const conv = conversations[currentId];
+  const at = after === undefined ? conv.messages.length : after + 1;
+  conv.messages.splice(at, 0, { type, text: "" });
+  selected.clear(); saveConv(conv); renderMessages(); editBubble(at);
+}
 
 // ===================== SELECTION → SPLIT =====================
 let lastSelection = null;
