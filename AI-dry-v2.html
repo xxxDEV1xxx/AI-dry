@@ -850,6 +850,7 @@ msgBox.addEventListener("contextmenu", e => {
   if (!b) return;
   e.preventDefault();
   if (!selected.has(+b.dataset.idx)) setSel(b, true);
+  ctxIdx = +b.dataset.idx;
   const m = document.getElementById("ctxMenu");
   m.style.display = "flex";
   m.style.left = Math.min(e.clientX, window.innerWidth - 200) + "px";
@@ -858,14 +859,22 @@ msgBox.addEventListener("contextmenu", e => {
 document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu")) hideCtx(); });
 function hideCtx() { document.getElementById("ctxMenu").style.display = "none"; }
 
+let ctxIdx = null;
 function mergeSelected(type) {
   if (!currentId || !selected.size) return;
   const conv = conversations[currentId];
   const idxs = [...selected].sort((a, b) => a - b);
+  const label = type === "q" ? "Question" : "Answer";
+  if (!confirm("Merge " + idxs.length + " selected box(es) into 1 " + label + "?\n\nText is appended in conversation order and placed at the bubble you right-clicked.")) { hideCtx(); return; }
+  const anchor = idxs.includes(ctxIdx) ? ctxIdx : idxs[0];
   const text = idxs.map(i => conv.messages[i].text).join("\n");
-  conv.messages[idxs[0]] = { type, text };
-  for (let k = idxs.length - 1; k > 0; k--) conv.messages.splice(idxs[k], 1);
-  selected.clear(); saveConv(conv); renderMessages(); hideCtx();
+  const at = anchor - idxs.filter(i => i < anchor).length;
+  for (let k = idxs.length - 1; k >= 0; k--) conv.messages.splice(idxs[k], 1);
+  conv.messages.splice(at, 0, { type, text });
+  selected.clear(); ctxIdx = null;
+  saveConv(conv); renderMessages(); hideCtx();
+  const nb = document.querySelector(`.bubble[data-idx="${at}"]`);
+  if (nb) nb.scrollIntoView({ block: "center" });
 }
 
 function deleteSelected() {
