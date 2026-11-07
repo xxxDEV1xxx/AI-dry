@@ -284,6 +284,14 @@
   .conv-item.indent { margin-left: 10px; }
   .conv-item .mov { opacity: 0.5; font-size: 12px; padding: 2px 6px; }
   .conv-item .mov:hover { opacity: 1; color: #ffb62e; }
+  #fuPanel { display: none; position: fixed; width: 250px; z-index: 520; padding: 10px; background: linear-gradient(#141414, #050505); border: 1px solid #4a3d1c; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.7); font: 700 9px/1.2 Arial, Helvetica, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; color: #d9b86c; }
+  #fuPanel #fuTitle { font-size: 10px; margin-bottom: 8px; }
+  #fuPanel .fuGrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px 4px; margin: 8px 0; }
+  #fuPanel label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #fuPanel input[type="text"] { width: 100%; padding: 3px 6px; font-size: 11px; margin-top: 4px; }
+  #fuPanel .fuRow { display: flex; gap: 6px; margin-top: 8px; }
+  #fuPanel button { padding: 4px 8px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+  #fuStatus { margin-top: 6px; font-size: 9px; color: #7dffb0; min-height: 10px; letter-spacing: 0.5px; text-transform: none; }
   /* Path hint */
   #pathHint {
     font-size: 11px;
@@ -418,6 +426,30 @@
     </label>
     <button onclick="importPaste()">Import</button>
   </div>
+</div>
+
+<div id="fuPanel">
+  <div id="fuTitle">Upload folder</div>
+  <div>Formats</div>
+  <div class="fuGrid">
+    <label><input type="checkbox" class="fuExt" value="txt" checked>txt</label>
+    <label><input type="checkbox" class="fuExt" value="md">md</label>
+    <label><input type="checkbox" class="fuExt" value="log">log</label>
+    <label><input type="checkbox" class="fuExt" value="json">json</label>
+    <label><input type="checkbox" class="fuExt" value="csv">csv</label>
+    <label><input type="checkbox" class="fuExt" value="html">html</label>
+    <label><input type="checkbox" class="fuExt" value="xml">xml</label>
+    <label><input type="checkbox" class="fuExt" value="rtf">rtf</label>
+    <label><input type="checkbox" id="fuAny" onchange="fuToggleAny()">Any</label>
+  </div>
+  <input type="text" id="fuExtra" placeholder="extra extensions: conf, ini, cfg">
+  <label style="margin-top:8px;"><input type="checkbox" id="fuSub" checked>Include subfolders</label>
+  <div class="fuRow">
+    <button onclick="fuInput.click()">Choose folder…</button>
+    <button onclick="closeFU()">Close</button>
+  </div>
+  <div id="fuStatus"></div>
+  <input type="file" id="fuInput" webkitdirectory multiple style="display:none">
 </div>
 
 <!-- Search modal -->
@@ -699,6 +731,7 @@ function renderSidebar() {
     h.querySelector(".arr").onclick = e => { e.stopPropagation(); closed ? foldClosed.delete(fn) : foldClosed.add(fn); saveFolders(); renderSidebar(); };
     h.querySelector(".fx").onclick = e => { e.stopPropagation(); exportFolder(fn); };
     h.onclick = () => { if (fn) { currentFolder = fn; saveFolders(); renderSidebar(); } };
+    h.oncontextmenu = e => { e.preventDefault(); openFolderUpload(fn, e.clientX, e.clientY); };
     list.appendChild(h);
     if (closed) return;
     items.forEach(c => {
@@ -1264,6 +1297,82 @@ document.getElementById("restoreInput").addEventListener("change", async e => {
   renderSidebar();
   if (first) loadConversation(first);
   alert("Merged " + added + " conversation(s). Skipped " + skipped + " already present.");
+});
+
+// ===================== FOLDER UPLOAD =====================
+const fuPanel = document.getElementById("fuPanel");
+const fuInput = document.getElementById("fuInput");
+let fuTarget = "", fuOpenedAt = 0, fuBusy = false;
+
+function openFolderUpload(fn, x, y) {
+  fuTarget = fn;
+  document.getElementById("fuTitle").textContent = "Upload folder → " + (fn || "Unfiled");
+  document.getElementById("fuStatus").textContent = "";
+  fuPanel.style.display = "block";
+  fuOpenedAt = Date.now();
+  fuPanel.style.left = Math.max(4, Math.min(x, window.innerWidth - fuPanel.offsetWidth - 4)) + "px";
+  fuPanel.style.top = Math.max(4, Math.min(y, window.innerHeight - fuPanel.offsetHeight - 4)) + "px";
+}
+
+function closeFU() { fuPanel.style.display = "none"; }
+
+function fuToggleAny() {
+  const any = document.getElementById("fuAny").checked;
+  fuPanel.querySelectorAll(".fuExt, #fuExtra").forEach(el => el.disabled = any);
+}
+
+// click outside the panel closes it (ignored while an upload is running)
+document.addEventListener("click", e => {
+  if (fuPanel.style.display !== "block" || fuBusy) return;
+  if (Date.now() - fuOpenedAt < 400) return;
+  if (!e.target.closest("#fuPanel")) closeFU();
+});
+
+fuInput.addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  const st = document.getElementById("fuStatus");
+  if (!files.length) return;
+  const any = document.getElementById("fuAny").checked;
+  const sub = document.getElementById("fuSub").checked;
+  const exts = new Set([...fuPanel.querySelectorAll(".fuExt:checked")].map(c => c.value));
+  document.getElementById("fuExtra").value.split(",").forEach(s => {
+    s = s.trim().toLowerCase().replace(/^\./, "");
+    if (s) exts.add(s);
+  });
+  const rel = f => f.webkitRelativePath || f.name;
+  const pick = files.filter(f => {
+    if (!sub && rel(f).split("/").length > 2) return false;
+    const i = f.name.lastIndexOf(".");
+    const ext = i > 0 ? f.name.slice(i + 1).toLowerCase() : "";
+    return any || exts.has(ext);
+  }).sort((a, b) => rel(a).localeCompare(rel(b), undefined, { numeric: true }));
+  if (!pick.length) { st.textContent = "No files matched the checked formats"; return; }
+
+  fuBusy = true;
+  const base = Date.now();
+  let added = 0, empty = 0, binary = 0, first = null;
+  for (let i = 0; i < pick.length; i++) {
+    st.textContent = "Reading " + (i + 1) + " / " + pick.length + " …";
+    const f = pick[i];
+    let text;
+    try { text = await f.text(); } catch (err) { empty++; continue; }
+    if (text.indexOf("\u0000") !== -1) { binary++; continue; }
+    const messages = parseFileContent(text);
+    if (!messages.length) { empty++; continue; }
+    const id = "c" + base + "_" + i + Math.random().toString(36).slice(2, 6);
+    const dot = f.name.lastIndexOf(".");
+    const conv = { id, name: dot > 0 ? f.name.slice(0, dot) : f.name, messages, created: base + (pick.length - i), folder: fuTarget };
+    await saveConv(conv);
+    conversations[id] = conv;
+    if (!first) first = id;
+    added++;
+  }
+  fuBusy = false;
+  closeFU();
+  renderSidebar();
+  if (first) loadConversation(first);
+  alert("Uploaded " + added + " file(s) into " + (fuTarget || "Unfiled") + ".\nSkipped " + empty + " empty/unreadable and " + binary + " binary.");
 });
 
 // ===================== SELECTION → SPLIT =====================
