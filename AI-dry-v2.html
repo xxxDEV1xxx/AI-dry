@@ -295,6 +295,8 @@
   .bubble.speaking { outline: 2px solid #43e26b; outline-offset: 2px; }
   #ttsVoice { width: 110px; height: 22px; margin: 5px 0; font-size: 10px; color: #7dffb0; background: #05070a; border: 1px solid #4a3d1c; border-radius: 11px; }
   #ttsRate { width: 70px; margin: 8px 0; accent-color: #d9b86c; }
+  .fold .fd { opacity: 0.6; font-size: 8px; }
+  .fold .fd:hover { opacity: 1; color: #ff6b6b; }
   /* Path hint */
   #pathHint {
     font-size: 11px;
@@ -450,6 +452,7 @@
     <label><input type="checkbox" class="fuExt" value="html">html</label>
     <label><input type="checkbox" class="fuExt" value="xml">xml</label>
     <label><input type="checkbox" class="fuExt" value="rtf">rtf</label>
+    <label><input type="checkbox" class="fuExt" value="js">js</label>
     <label><input type="checkbox" id="fuAny" onchange="fuToggleAny()">Any</label>
   </div>
   <input type="text" id="fuExtra" placeholder="extra extensions: conf, ini, cfg">
@@ -458,6 +461,15 @@
     <button onclick="fuInput.click()">Choose folder…</button>
     <button onclick="closeFU()">Close</button>
   </div>
+  <label style="margin-top:8px;"><input type="checkbox" id="fuAtt">Include attachment text</label>
+  <div class="fuRow">
+    <button onclick="fuJson.click()">conversations.json…</button>
+  </div>
+  <input type="file" id="fuJson" accept=".json,application/json" style="display:none">
+  <div class="fuRow">
+    <button onclick="fuGrok.click()">grok .js…</button>
+  </div>
+  <input type="file" id="fuGrok" accept=".js,.json,.txt" multiple style="display:none">
   <div id="fuStatus"></div>
   <input type="file" id="fuInput" webkitdirectory multiple style="display:none">
 </div>
@@ -737,9 +749,25 @@ function renderSidebar() {
     const closed = foldClosed.has(fn);
     const h = document.createElement("div");
     h.className = "fold" + (fn === currentFolder ? " cur" : "");
-    h.innerHTML = `<span class="arr">${closed ? "▸" : "▾"}</span><span class="fn">${escapeHtml(fn || "Unfiled")}</span><span class="cnt">${items.length}</span><span class="fx">Exp</span>`;
+    h.innerHTML = `<span class="arr">${closed ? "▸" : "▾"}</span><span class="fn">${escapeHtml(fn || "Unfiled")}</span><span class="cnt">${items.length}</span><span class="fx">Exp</span>${fn ? '<span class="fd">Del</span>' : ""}`;
     h.querySelector(".arr").onclick = e => { e.stopPropagation(); closed ? foldClosed.delete(fn) : foldClosed.add(fn); saveFolders(); renderSidebar(); };
     h.querySelector(".fx").onclick = e => { e.stopPropagation(); exportFolder(fn); };
+async function deleteFolder(fn) {
+  if (!fn || !folders.includes(fn)) return;
+  const ids = Object.values(conversations).filter(c => c.folder === fn).map(c => c.id);
+  if (!confirm('Delete folder "' + fn + '" and its ' + ids.length + " conversation(s)?\n\nThis cannot be undone. Use Backup first if unsure.")) return;
+  for (const id of ids) { await deleteConv(id); delete conversations[id]; }
+  folders = folders.filter(f => f !== fn);
+  foldClosed.delete(fn);
+  if (currentFolder === fn) currentFolder = folders[0] || "";
+  if (currentId && !conversations[currentId]) {
+    currentId = null;
+    document.getElementById("messages").innerHTML = "";
+  }
+  saveFolders();
+  renderSidebar();
+}
+    const fd = h.querySelector(".fd"); if (fd) fd.onclick = e => { e.stopPropagation(); deleteFolder(fn); };
     h.onclick = () => { if (fn) { currentFolder = fn; saveFolders(); renderSidebar(); } };
     h.oncontextmenu = e => { e.preventDefault(); openFolderUpload(fn, e.clientX, e.clientY); };
     list.appendChild(h);
@@ -1368,6 +1396,25 @@ fuInput.addEventListener("change", async e => {
     let text;
     try { text = await f.text(); } catch (err) { empty++; continue; }
     if (text.indexOf("\u0000") !== -1) { binary++; continue; }
+    if (isGrokText(text)) {
+      const gd = grokParse(text);
+      if (gd) {
+        const r = await importGrok(gd, fuTarget);
+        added += r.added;
+        if (!first) first = r.first;
+        continue;
+      }
+    }
+    if (/\.json$/i.test(f.name) && text.trimStart()[0] === "[") {
+      let d = null;
+      try { d = JSON.parse(text); } catch (err) {}
+      if (isConvJson(d)) {
+        const r = await importConvJson(d, fuTarget, document.getElementById("fuAtt").checked);
+        added += r.added;
+        if (!first) first = r.first;
+        continue;
+      }
+    }
     const messages = parseFileContent(text);
     if (!messages.length) { empty++; continue; }
     const id = "c" + base + "_" + i + Math.random().toString(36).slice(2, 6);
@@ -1469,6 +1516,162 @@ function ttsSpeak(g) {
 }
 
 window.addEventListener("beforeunload", () => { if ("speechSynthesis" in window) speechSynthesis.cancel(); });
+
+// ===================== CONVERSATIONS.JSON IMPORT =====================
+const fuJson = document.getElementById("fuJson");
+
+function cjText(m, withAtt) {
+  let t = (m.text || "").trim();
+  if (!t && Array.isArray(m.content)) {
+    t = m.content.filter(b => b && b.type === "text" && b.text).map(b => b.text).join("\n").trim();
+  }
+  if (withAtt && Array.isArray(m.attachments)) {
+    m.attachments.forEach(a => {
+      if (a && a.extracted_content) t += (t ? "\n\n" : "") + "[Attachment" + (a.file_name ? ": " + a.file_name : "") + "]\n" + a.extracted_content;
+    });
+  }
+  return t;
+}
+
+function isConvJson(d) {
+  return Array.isArray(d) && d.length > 0 && d.some(c => c && Array.isArray(c.chat_messages));
+}
+
+async function importConvJson(data, folder, withAtt) {
+  const PH = /This block is not supported on your current device yet\.?/g;
+  const clean = s => (s || "").replace(PH, "").trim();
+  let added = 0, skipped = 0, empty = 0, failed = 0, first = null;
+  for (const c of data) {
+    if (!c || !Array.isArray(c.chat_messages)) continue;
+    try {
+      const id = "cj_" + (c.uuid || Date.now() + Math.random().toString(36).slice(2, 7)) + "@" + folder;
+      if (conversations[id]) { skipped++; continue; }
+      const messages = [];
+      c.chat_messages.forEach(m => {
+        let text = clean(cjText(m, withAtt));
+        if (!text && Array.isArray(m.content)) text = clean(m.content.filter(b => b && b.type === "text" && b.text).map(b => b.text).join("\n"));
+        if (text) messages.push({ type: m.sender === "human" ? "q" : "a", text });
+      });
+      if (!messages.length) { empty++; continue; }
+      const ts = Date.parse(c.created_at);
+      const conv = {
+        id,
+        name: (c.name || "").trim() || "Untitled " + (c.created_at || "").slice(0, 10),
+        messages,
+        created: isNaN(ts) ? Date.now() : ts,
+        folder
+      };
+      await saveConv(conv);
+      conversations[id] = conv;
+      if (!first) first = id;
+      added++;
+    } catch (err) { failed++; }
+  }
+  return { added, skipped, empty, failed, first };
+}
+
+fuJson.addEventListener("change", async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const st = document.getElementById("fuStatus");
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (err) { st.textContent = "Not valid JSON"; return; }
+  if (!isConvJson(data)) { st.textContent = "No chat_messages found in this file"; return; }
+  fuBusy = true;
+  st.textContent = "Importing " + data.length + " conversation(s) …";
+  let r;
+  try {
+    r = await importConvJson(data, fuTarget, document.getElementById("fuAtt").checked);
+  } catch (err) {
+    fuBusy = false;
+    st.textContent = "Import failed: " + err.message;
+    return;
+  }
+  fuBusy = false;
+  closeFU();
+  renderSidebar();
+  if (r.first) loadConversation(r.first);
+  alert("Imported " + r.added + " conversation(s) into " + (fuTarget || "Unfiled") + ".\nSkipped " + r.skipped + " already in this folder, " + r.empty + " with no text, " + r.failed + " failed.");
+});
+
+// ===================== GROK ARCHIVE (.js) IMPORT =====================
+const fuGrok = document.getElementById("fuGrok");
+
+function isGrokText(text) {
+  return /YTD\.grok_chat_item/.test(text.slice(0, 300));
+}
+
+function grokParse(text) {
+  const a = text.indexOf("["), b = text.lastIndexOf("]");
+  if (a < 0 || b < a) return null;
+  try {
+    const d = JSON.parse(text.slice(a, b + 1));
+    return Array.isArray(d) && d.some(x => x && x.grokChatItem) ? d : null;
+  } catch (err) { return null; }
+}
+
+async function importGrok(data, folder) {
+  const chats = new Map();
+  data.forEach(x => {
+    const g = x && x.grokChatItem;
+    if (!g || !g.chatId || typeof g.message !== "string") return;
+    if (!chats.has(g.chatId)) chats.set(g.chatId, []);
+    chats.get(g.chatId).push(g);
+  });
+  let added = 0, skipped = 0, empty = 0, failed = 0, first = null;
+  for (const [chatId, items] of chats) {
+    try {
+      const id = "gk_" + chatId + "@" + folder;
+      if (conversations[id]) { skipped++; continue; }
+      items.sort((p, q) => Date.parse(p.createdAt) - Date.parse(q.createdAt)); // stable: same-timestamp pairs keep file order
+      const messages = [];
+      items.forEach(g => {
+        const text = g.message.trim();
+        const isUser = g.sender && String(g.sender.name).toLowerCase() === "user";
+        if (text) messages.push({ type: isUser ? "q" : "a", text });
+      });
+      if (!messages.length) { empty++; continue; }
+      const firstQ = messages.find(m => m.type === "q");
+      const ts = Date.parse(items[0].createdAt);
+      const conv = {
+        id,
+        name: firstQ ? firstQ.text.replace(/\s+/g, " ").slice(0, 60) : "Grok chat " + (items[0].createdAt || "").slice(0, 10),
+        messages,
+        created: isNaN(ts) ? Date.now() : ts,
+        folder
+      };
+      await saveConv(conv);
+      conversations[id] = conv;
+      if (!first) first = id;
+      added++;
+    } catch (err) { failed++; }
+  }
+  return { added, skipped, empty, failed, first };
+}
+
+fuGrok.addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+  const st = document.getElementById("fuStatus");
+  let all = [];
+  for (const f of files) {
+    const d = grokParse(await f.text());
+    if (d) all = all.concat(d);
+  }
+  if (!all.length) { st.textContent = "No grokChatItem entries found"; return; }
+  fuBusy = true;
+  st.textContent = "Importing " + all.length + " Grok message(s) …";
+  let r;
+  try { r = await importGrok(all, fuTarget); }
+  catch (err) { fuBusy = false; st.textContent = "Import failed: " + err.message; return; }
+  fuBusy = false;
+  closeFU();
+  renderSidebar();
+  if (r.first) loadConversation(r.first);
+  alert("Imported " + r.added + " Grok chat(s) into " + (fuTarget || "Unfiled") + ".\nSkipped " + r.skipped + " already in this folder, " + r.empty + " empty, " + r.failed + " failed.");
+});
 
 // ===================== SELECTION → SPLIT =====================
 let lastSelection = null;
