@@ -292,6 +292,9 @@
   #fuPanel .fuRow { display: flex; gap: 6px; margin-top: 8px; }
   #fuPanel button { padding: 4px 8px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
   #fuStatus { margin-top: 6px; font-size: 9px; color: #7dffb0; min-height: 10px; letter-spacing: 0.5px; text-transform: none; }
+  .bubble.speaking { outline: 2px solid #43e26b; outline-offset: 2px; }
+  #ttsVoice { width: 110px; height: 22px; margin: 5px 0; font-size: 10px; color: #7dffb0; background: #05070a; border: 1px solid #4a3d1c; border-radius: 11px; }
+  #ttsRate { width: 70px; margin: 8px 0; accent-color: #d9b86c; }
   /* Path hint */
   #pathHint {
     font-size: 11px;
@@ -326,6 +329,13 @@
     </div>
     <div class="grp">
       <div class="ch" onclick="toggleSettings()"><button class="key k-red"></button><span class="lbl">Theme</span></div>
+    </div>
+    <div class="grp">
+      <div class="ch" onclick="ttsPlay()"><button class="key k-green"></button><span class="lbl">Read</span></div>
+      <div class="ch" onclick="ttsPause()"><button id="ttsPauseBtn" class="key k-amber"></button><span class="lbl">Pause</span></div>
+      <div class="ch" onclick="ttsStop()"><button class="key k-red"></button><span class="lbl">Stop</span></div>
+      <div class="ch"><select id="ttsVoice"></select><span class="lbl">Voice</span></div>
+      <div class="ch"><input type="range" id="ttsRate" min="0.5" max="2" step="0.1" value="1"><span class="lbl">Speed</span></div>
     </div>
     <span id="pathHint"></span>
   </div>
@@ -760,7 +770,7 @@ function renderMessages() {
     const div = document.createElement("div");
     div.className = "bubble " + m.type + (selected.has(idx) ? " sel" : "");
     div.dataset.idx = idx;
-    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div><div class="content">${renderRich(m.text)}</div><div class="tools"><button onclick="editBubble(${idx})">Edit</button><button onclick="addBubble('q',${idx})">+Q below</button><button onclick="addBubble('a',${idx})">+A below</button><button onclick="openPaste(${idx},'above')">Paste above</button><button onclick="openPaste(${idx},'below')">Paste below</button><button onclick="deleteBubble(${idx})">Del</button></div>`;
+    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div><div class="content">${renderRich(m.text)}</div><div class="tools"><button onclick="editBubble(${idx})">Edit</button><button onclick="addBubble('q',${idx})">+Q below</button><button onclick="addBubble('a',${idx})">+A below</button><button onclick="openPaste(${idx},'above')">Paste above</button><button onclick="openPaste(${idx},'below')">Paste below</button><button onclick="ttsPlay(${idx})">Read</button><button onclick="deleteBubble(${idx})">Del</button></div>`;
     area.appendChild(div);
   });
   area.scrollTop = same ? keep : area.scrollHeight;
@@ -1374,6 +1384,91 @@ fuInput.addEventListener("change", async e => {
   if (first) loadConversation(first);
   alert("Uploaded " + added + " file(s) into " + (fuTarget || "Unfiled") + ".\nSkipped " + empty + " empty/unreadable and " + binary + " binary.");
 });
+
+// ===================== READ ALOUD (Web Speech API) =====================
+let ttsQueue = [], ttsPos = 0, ttsGen = 0, ttsU = null;
+
+function ttsVoices() {
+  if (!("speechSynthesis" in window)) return;
+  const sel = document.getElementById("ttsVoice");
+  const cur = sel.value;
+  sel.innerHTML = speechSynthesis.getVoices().map(v =>
+    `<option value="${escapeHtml(v.name)}">${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join("");
+  if (cur) sel.value = cur;
+}
+if ("speechSynthesis" in window) {
+  speechSynthesis.onvoiceschanged = ttsVoices;
+  ttsVoices();
+}
+
+function ttsClear() {
+  document.querySelectorAll(".bubble.speaking").forEach(b => b.classList.remove("speaking"));
+  document.getElementById("ttsPauseBtn").classList.remove("on");
+}
+
+function ttsStop() {
+  ttsGen++;
+  ttsQueue = []; ttsPos = 0;
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  ttsClear();
+}
+
+function ttsPause() {
+  if (!("speechSynthesis" in window)) return;
+  const btn = document.getElementById("ttsPauseBtn");
+  if (speechSynthesis.paused) { speechSynthesis.resume(); btn.classList.remove("on"); }
+  else if (speechSynthesis.speaking) { speechSynthesis.pause(); btn.classList.add("on"); }
+}
+
+function ttsPlay(from) {
+  if (!("speechSynthesis" in window)) return alert("Speech is not supported in this browser");
+  if (!currentId || !conversations[currentId]) return;
+  ttsStop();
+  const msgs = conversations[currentId].messages;
+  const start = from !== undefined ? from : (selected.size ? Math.min(...selected) : 0);
+  const queue = [];
+  for (let i = start; i < msgs.length; i++) {
+    const clean = msgs[i].text
+      .replace(/```[\s\S]*?```/g, " code block. ")
+      .replace(/[`*#>]/g, "")
+      .replace(/\s*\n+\s*/g, ". ")
+      .trim();
+    if (!clean) continue;
+    // chunks of ~200 chars; long utterances get cut off in Chrome
+    const parts = clean.match(/[^.!?]+[.!?]*\s*/g) || [clean];
+    let buf = "", first = true;
+    const push = t => { queue.push({ idx: i, text: t, first }); first = false; };
+    parts.forEach(p => {
+      if ((buf + p).length > 200 && buf) { push(buf); buf = p; } else buf += p;
+    });
+    if (buf.trim()) push(buf);
+  }
+  if (!queue.length) return;
+  ttsQueue = queue; ttsPos = 0;
+  ttsSpeak(++ttsGen);
+}
+
+function ttsSpeak(g) {
+  if (g !== ttsGen) return;
+  if (ttsPos >= ttsQueue.length) { ttsClear(); return; }
+  const it = ttsQueue[ttsPos++];
+  if (it.first) {
+    ttsClear();
+    const b = document.querySelector(`.bubble[data-idx="${it.idx}"]`);
+    if (b) { b.classList.add("speaking"); b.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  }
+  const u = new SpeechSynthesisUtterance(it.text);
+  const name = document.getElementById("ttsVoice").value;
+  const v = speechSynthesis.getVoices().find(x => x.name === name);
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = parseFloat(document.getElementById("ttsRate").value) || 1;
+  u.onend = () => ttsSpeak(g);
+  u.onerror = () => ttsSpeak(g);
+  ttsU = u; // keep a reference so the browser does not garbage-collect it mid-speech
+  speechSynthesis.speak(u);
+}
+
+window.addEventListener("beforeunload", () => { if ("speechSynthesis" in window) speechSynthesis.cancel(); });
 
 // ===================== SELECTION → SPLIT =====================
 let lastSelection = null;
