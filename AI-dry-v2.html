@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-dry Viewer</title>
+<style>
+  :root {
+    --bg-color: #1a1a2e;
+    --bg-image: none;
+    --font-family: 'Segoe UI', system-ui, sans-serif;
+    --font-size: 15px;
+    --font-color: #e0e0e0;
+    --q-bg: #0f3460;
+    --a-bg: #16213e;
+    --bubble-radius: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    color: var(--font-color);
+    background-color: var(--bg-color);
+    background-image: var(--bg-image);
+    background-size: cover;
+    background-attachment: fixed;
+    background-position: center;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Top bar */
+  #topbar {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid #333;
+    align-items: center;
+    flex-wrap: wrap;
+    z-index: 100;
+  }
+
+  button, .file-label {
+    background: #0f3460;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+  }
+  button:hover, .file-label:hover { background: #1a4a8a; }
+  button.danger { background: #8b0000; }
+  button.danger:hover { background: #a00; }
+
+  input[type="text"], input[type="search"] {
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #111;
+    color: #eee;
+    font-size: 13px;
+  }
+
+  #searchBox { width: 220px; }
+
+  /* Main layout */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 260px;
+    background: rgba(0,0,0,0.45);
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #convList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .conv-item {
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .conv-item:hover { background: rgba(255,255,255,0.12); }
+  .conv-item.active { background: #0f3460; }
+  .conv-item .del {
+    opacity: 0.5;
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+  .conv-item .del:hover { opacity: 1; color: #ff6b6b; }
+
+  /* Chat area */
+  #chatArea {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .bubble {
+    max-width: 78%;
+    padding: 12px 16px;
+    border-radius: var(--bubble-radius);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    position: relative;
+  }
+  .bubble.q {
+    align-self: flex-start;
+    background: var(--q-bg);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble.a {
+    align-self: flex-end;
+    background: var(--a-bg);
+    border-bottom-right-radius: 4px;
+  }
+  .bubble .label {
+    font-size: 11px;
+    opacity: 0.6;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  /* Selection toolbar */
+  #selToolbar {
+    display: none;
+    position: absolute;
+    background: #222;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 6px;
+    gap: 6px;
+    z-index: 200;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #selToolbar button { padding: 5px 10px; font-size: 12px; }
+
+  /* Settings panel */
+  #settings {
+    display: none;
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    width: 340px;
+    background: #1e1e2f;
+    border: 1px solid #444;
+    border-radius: 12px;
+    padding: 18px;
+    z-index: 300;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  }
+  #settings h3 { margin-bottom: 12px; font-size: 16px; }
+  #settings label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: 0.85; }
+  .palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .swatch {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .swatch:hover, .swatch.active { border-color: #fff; }
+
+  /* Search results modal */
+  #searchModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 400;
+    align-items: center;
+    justify-content: center;
+  }
+  #searchResults {
+    background: #1a1a2e;
+    width: 80%;
+    max-width: 900px;
+    max-height: 80vh;
+    overflow-y: auto;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .search-hit {
+    background: rgba(255,255,255,0.05);
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    border-left: 4px solid #0f3460;
+  }
+  .search-hit .meta { font-size: 12px; opacity: 0.6; margin-bottom: 6px; }
+  .search-hit mark { background: #ff0; color: #000; padding: 0 2px; }
+  .bubble.sel { box-shadow: 0 0 0 2px #ffb62e, 0 0 10px #ffb62e, inset 0 0 8px rgba(255,182,46,0.55); }
+  body.selmode .bubble { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .bubble .tools { display: none; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .bubble.sel .tools, .bubble.editing .tools { display: flex; }
+  .bubble .tools button { padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.12); }
+  .bubble textarea { width: 100%; min-width: 300px; min-height: 120px; background: #111; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 8px; font: inherit; }
+  #ctxMenu { display: none; position: fixed; background: #222; border: 1px solid #555; border-radius: 8px; padding: 6px; z-index: 500; flex-direction: column; gap: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  #ctxMenu button { text-align: left; }
+
+  #pasteModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 450; align-items: center; justify-content: center; }
+  #pasteBox { background: #1a1a2e; width: 90%; max-width: 900px; max-height: 90vh; overflow-y: auto; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  #pasteText { width: 100%; height: 45vh; background: #111; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 13px; }
+  .bubble pre { background: #0b0b14; border: 1px solid #333; border-radius: 8px; padding: 10px; margin: 8px 0; overflow-x: auto; white-space: pre; font-family: 'Courier New', monospace; font-size: 0.9em; }
+  .bubble code.inl { background: rgba(255,255,255,0.12); padding: 1px 5px; border-radius: 4px; font-family: 'Courier New', monospace; }
+  .bubble .cp { float: right; padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.12); }
+
+  #topbar { flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 8px; background: linear-gradient(#1b1b1b, #0a0a0a); border-bottom: 2px solid #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 10px rgba(0,0,0,0.6); }
+  #deck { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; align-items: center; }
+  body.deck-off #deck { display: none; }
+  #deckToggle { padding: 2px 8px; font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: #d9b86c; background: #000; border: 1px solid #5a4a22; border-radius: 3px; }
+  .grp { display: flex; gap: 6px; padding: 4px 8px 3px; background: linear-gradient(#141414, #050505); border: 1px solid #4a3d1c; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,215,130,0.12); }
+  .ch { display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .ch .lbl { font: 700 7px/1 Arial, Helvetica, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; color: #d9b86c; white-space: nowrap; }
+  .key { position: relative; display: block; width: 22px; height: 22px; padding: 0; margin: 5px; border: none; border-radius: 50%; cursor: pointer; background: radial-gradient(circle at 35% 30%, #8a8f9c 0%, #4a4e5a 45%, #1d1f26 100%); box-shadow: 0 2px 3px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.4); transition: transform .06s; }
+  .key:hover { filter: brightness(1.2); }
+  .key:active, .key.on { transform: translateY(1px); box-shadow: 0 0 1px #000, inset 0 2px 3px rgba(0,0,0,0.7); }
+  .key::before { content: ""; position: absolute; inset: -4px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--led, #4aa3ff); opacity: 0.18; }
+  .key:active::before, .key.on::before { opacity: 1; box-shadow: 0 0 7px var(--led, #4aa3ff), inset 0 0 5px var(--led, #4aa3ff); }
+  .key::after { content: ""; position: absolute; top: 3px; left: 50%; width: 2px; height: 7px; margin-left: -1px; border-radius: 1px; background: rgba(0,0,0,0.55); }
+  .k-blue { --led: #4aa3ff; } .k-green { --led: #43e26b; } .k-amber { --led: #ffb62e; } .k-red { --led: #ff4d4d; }
+  #searchBox { width: 120px; height: 22px; margin: 5px 0; padding: 2px 8px; font-size: 11px; color: #7dffb0; font-family: monospace; background: #05070a; border: 1px solid #4a3d1c; border-radius: 11px; box-shadow: inset 0 2px 4px #000; }
+  #main { position: relative; }
+  #sidebar { transition: width .2s; }
+  body.sb-off #sidebar { width: 0; border-right: none; }
+  #sbHead { display: flex; justify-content: space-between; align-items: center; padding: 10px; font-size: 13px; opacity: 0.85; }
+  #sbHead button, #sbOpen { padding: 4px 8px; font-size: 14px; }
+  #sbOpen { display: none; position: absolute; left: 0; top: 10px; z-index: 50; border-radius: 0 8px 8px 0; }
+  body.sb-off #sbOpen { display: block; }
+  .conv-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-item .acts { display: flex; gap: 8px; margin-left: 8px; flex-shrink: 0; }
+  .conv-item .ren { opacity: 0.5; font-size: 12px; padding: 2px 6px; }
+  .conv-item .ren:hover { opacity: 1; color: #7dd3ff; }
+
+  .bubble.q { color: var(--q-font, #e0e0e0); }
+  .bubble.a { color: var(--a-font, #e0e0e0); }
+  .bubble.q:not(.sel) { box-shadow: var(--q-led, none); }
+  .bubble.a:not(.sel) { box-shadow: var(--a-led, none); }
+  .fold { display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 6px 0 3px; background: linear-gradient(#141414, #050505); border: 1px solid #4a3d1c; border-radius: 4px; font: 700 9px/1 Arial, Helvetica, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; color: #d9b86c; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .fold.cur { box-shadow: 0 0 0 1px #ffb62e, 0 0 8px #ffb62e; }
+  .fold .arr { width: 14px; text-align: center; }
+  .fold .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fold .cnt { opacity: 0.6; }
+  .fold .fx { opacity: 0.6; font-size: 8px; }
+  .fold .fx:hover { opacity: 1; color: #fff; }
+  .conv-item.indent { margin-left: 10px; }
+  .conv-item .mov { opacity: 0.5; font-size: 12px; padding: 2px 6px; }
+  .conv-item .mov:hover { opacity: 1; color: #ffb62e; }
+  /* Path hint */
+  #pathHint {
+    font-size: 11px;
+    opacity: 0.5;
+    margin-left: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <button id="deckToggle" onclick="toggleDeck()">Deck ▾</button>
+  <div id="deck">
+    <div class="grp">
+      <label class="ch"><input type="file" id="fileInput" accept=".txt,.md,.log,.json" style="display:none"><span class="key k-green"></span><span class="lbl">Upload</span></label>
+      <div class="ch" onclick="newEmptyConv()"><button class="key k-green"></button><span class="lbl">New</span></div>
+      <div class="ch" onclick="renameConv(currentId)"><button class="key k-blue"></button><span class="lbl">Rename</span></div>
+      <div class="ch" onclick="exportCurrent()"><button class="key k-blue"></button><span class="lbl">Export</span></div>
+      <div class="ch" onclick="exportAll()"><button class="key k-blue"></button><span class="lbl">Export all</span></div>
+      <div class="ch" onclick="backupAll()"><button class="key k-green"></button><span class="lbl">Backup</span></div>
+      <label class="ch"><input type="file" id="restoreInput" accept=".gz,.aidry,.json" style="display:none"><span class="key k-red"></span><span class="lbl">Restore</span></label>
+    </div>
+    <div class="grp">
+      <div class="ch" onclick="toggleSelectMode()"><button id="selModeBtn" class="key k-amber"></button><span class="lbl">Select</span></div>
+      <div class="ch" onclick="addBubble('q')"><button class="key k-amber"></button><span class="lbl">Add Q</span></div>
+      <div class="ch" onclick="addBubble('a')"><button class="key k-amber"></button><span class="lbl">Add A</span></div>
+      <div class="ch" onclick="openPaste()"><button class="key k-amber"></button><span class="lbl">Paste</span></div>
+    </div>
+    <div class="grp">
+      <div class="ch"><input type="search" id="searchBox" placeholder="Search all chats..." onkeydown="if(event.key==='Enter')doSearch()"><span class="lbl">Query</span></div>
+      <div class="ch" onclick="doSearch()"><button class="key k-blue"></button><span class="lbl">Search</span></div>
+    </div>
+    <div class="grp">
+      <div class="ch" onclick="toggleSettings()"><button class="key k-red"></button><span class="lbl">Theme</span></div>
+    </div>
+    <span id="pathHint"></span>
+  </div>
+</div>
+
+<div id="main">
+  <button id="sbOpen" onclick="toggleSidebar()">›</button>
+  <div id="sidebar">
+    <div id="sbHead"><span>Logs</span><span><button onclick="addFolder()">+ Folder</button> <button onclick="toggleSidebar()">‹</button></span></div>
+    <div id="convList"></div>
+  </div>
+  <div id="chatArea">
+    <div id="messages"></div>
+  </div>
+</div>
+
+<!-- Selection toolbar (appears on text select) -->
+<div id="selToolbar">
+  <button onclick="splitSelection('q')">→ Question</button>
+  <button onclick="splitSelection('a')">→ Answer</button>
+  <button onclick="hideSelToolbar()">[UNRECOGNIZED EMOJI]</button>
+</div>
+
+<div id="ctxMenu">
+  <button onclick="mergeSelected('q')">Merge → 1 Question</button>
+  <button onclick="mergeSelected('a')">Merge → 1 Answer</button>
+  <button class="danger" onclick="deleteSelected()">Delete selected</button>
+  <button onclick="clearSelection()">Clear selection</button>
+</div>
+
+<!-- Settings panel -->
+<div id="settings">
+  <h3>Background</h3>
+  <label>Color</label>
+  <input type="color" id="bgColor" value="#1a1a2e" oninput="applyTheme()">
+  <div class="palette" id="bgPalette"></div>
+  <label>Opacity / Darkness slider</label>
+  <input type="range" id="bgDark" min="0" max="100" value="100" oninput="applyTheme()">
+  <label>Background Image</label>
+  <input type="file" id="bgImage" accept="image/*" onchange="setBgImage(event)">
+  <button onclick="clearBgImage()" style="margin-top:6px;">Clear Image</button>
+
+  <h3 style="margin-top:20px;">Font</h3>
+  <label>Family</label>
+  <select id="fontFamily" onchange="applyTheme()">
+    <option value="'Segoe UI', system-ui, sans-serif">Segoe UI</option>
+    <option value="Georgia, serif">Georgia</option>
+    <option value="'Courier New', monospace">Courier New</option>
+    <option value="Arial, sans-serif">Arial</option>
+    <option value="'Roboto', sans-serif">Roboto</option>
+    <option value="'Comic Sans MS', cursive">Comic Sans</option>
+    <option value="system-ui">System UI</option>
+  </select>
+  <label>Size</label>
+  <input type="range" id="fontSize" min="11" max="24" value="15" oninput="applyTheme()">
+  <span id="fontSizeVal">15px</span>
+  <label>Color</label>
+  <input type="color" id="fontColor" value="#e0e0e0" oninput="applyTheme()">
+  <div class="palette" id="fontPalette"></div>
+  <label>Question text color</label>
+  <input type="color" id="qFont" value="#e0e0e0" oninput="applyTheme()">
+  <label>Answer text color</label>
+  <input type="color" id="aFont" value="#e0e0e0" oninput="applyTheme()">
+  <h3 style="margin-top:20px;">Bubble LED</h3>
+  <label><input type="checkbox" id="qLedOn" onchange="applyTheme()"> Question LED on</label>
+  <input type="color" id="qLedColor" value="#4aa3ff" oninput="applyTheme()">
+  <label><input type="checkbox" id="aLedOn" onchange="applyTheme()"> Answer LED on</label>
+  <input type="color" id="aLedColor" value="#43e26b" oninput="applyTheme()">
+
+  <h3 style="margin-top:20px;">Bubble Colors</h3>
+  <label>Question</label>
+  <input type="color" id="qColor" value="#0f3460" oninput="applyTheme()">
+  <label>Answer</label>
+  <input type="color" id="aColor" value="#16213e" oninput="applyTheme()">
+  <label>Bubble opacity <span id="bubAlphaVal">100%</span></label>
+  <input type="range" id="bubAlpha" min="0" max="100" value="100" oninput="applyTheme()">
+
+  <button onclick="toggleSettings()" style="margin-top:18px;width:100%;">Close</button>
+</div>
+
+<div id="pasteModal">
+  <div id="pasteBox">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>Paste Chat</h3>
+      <button onclick="closePaste()">Close</button>
+    </div>
+    <input type="text" id="pasteName" placeholder="Conversation name">
+    <textarea id="pasteText" placeholder="Paste the whole conversation here"></textarea>
+    <label style="font-size:13px;">Unlabeled text: first <input type="number" id="pasteQBlocks" value="1" min="1" style="width:60px"> blank-line block(s) = question, rest = answer</label>
+    <label style="font-size:13px;">Paste to:
+      <select id="pasteMode">
+        <option value="new">New conversation</option>
+        <option value="bottom">Bottom of current</option>
+        <option value="top">Top of current</option>
+        <option value="above">Above chosen bubble</option>
+        <option value="below">Below chosen bubble</option>
+      </select>
+    </label>
+    <button onclick="importPaste()">Import</button>
+  </div>
+</div>
+
+<!-- Search modal -->
+<div id="searchModal">
+  <div id="searchResults">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+      <h3>Search Results</h3>
+      <button onclick="closeSearch()">Close</button>
+    </div>
+    <div id="searchHits"></div>
+  </div>
+</div>
+
+<script>
+// ===================== CONFIG =====================
+const DEFAULT_Q_PREFIX = "QQ";
+const DEFAULT_A_PREFIX = "AA";
+let Q_PREFIX = DEFAULT_Q_PREFIX;
+let A_PREFIX = DEFAULT_A_PREFIX;
+
+// ===================== STORAGE (IndexedDB) =====================
+const DB_NAME = "AI-dry-DB";
+const STORE = "conversations";
+let db = null;
+let currentId = null;
+let conversations = {}; // id -> {name, messages:[{type:'q'|'a', text}], created}
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains(STORE)) {
+        d.createObjectStore(STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = e => { db = e.target.result; resolve(); };
+    req.onerror = e => reject(e);
+  });
+}
+
+function saveConv(conv) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(conv);
+    tx.oncomplete = () => resolve();
+    tx.onerror = e => reject(e);
+  });
+}
+
+function loadAll() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = e => reject(e);
+  });
+}
+
+function deleteConv(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = e => reject(e);
+  });
+}
+
+// ===================== THEME =====================
+const PALETTE = [
+  "#1a1a2e","#16213e","#0f3460","#533483","#e94560",
+  "#0d0d0d","#1b1b1b","#2d3436","#00b894","#0984e3",
+  "#6c5ce7","#fd79a8","#fdcb6e","#e17055","#ffffff",
+  "#f5f5f5","#dfe6e9","#b2bec3"
+];
+
+function buildPalettes() {
+  const bgPal = document.getElementById("bgPalette");
+  const fontPal = document.getElementById("fontPalette");
+  PALETTE.forEach(c => {
+    const s1 = document.createElement("div");
+    s1.className = "swatch";
+    s1.style.background = c;
+    s1.onclick = () => { document.getElementById("bgColor").value = c; applyTheme(); };
+    bgPal.appendChild(s1);
+
+    const s2 = document.createElement("div");
+    s2.className = "swatch";
+    s2.style.background = c;
+    s2.onclick = () => { document.getElementById("fontColor").value = c; applyTheme(); };
+    fontPal.appendChild(s2);
+  });
+}
+
+function applyTheme() {
+  const root = document.documentElement;
+  const bg = document.getElementById("bgColor").value;
+  const dark = document.getElementById("bgDark").value / 100;
+  // darken the color a bit via overlay feel
+  root.style.setProperty("--bg-color", bg);
+  root.style.setProperty("--font-family", document.getElementById("fontFamily").value);
+  root.style.setProperty("--font-size", document.getElementById("fontSize").value + "px");
+  document.getElementById("fontSizeVal").textContent = document.getElementById("fontSize").value + "px";
+  root.style.setProperty("--font-color", document.getElementById("fontColor").value);
+  root.style.setProperty("--q-font", document.getElementById("qFont").value);
+  root.style.setProperty("--a-font", document.getElementById("aFont").value);
+  const led = c => `0 0 0 2px ${c}, 0 0 10px ${c}, inset 0 0 8px ${c}8c`;
+  root.style.setProperty("--q-led", document.getElementById("qLedOn").checked ? led(document.getElementById("qLedColor").value) : "none");
+  root.style.setProperty("--a-led", document.getElementById("aLedOn").checked ? led(document.getElementById("aLedColor").value) : "none");
+  const ba = document.getElementById("bubAlpha").value / 100;
+  document.getElementById("bubAlphaVal").textContent = Math.round(ba * 100) + "%";
+  const rgba = (h, a) => `rgba(${parseInt(h.slice(1,3),16)},${parseInt(h.slice(3,5),16)},${parseInt(h.slice(5,7),16)},${a})`;
+  root.style.setProperty("--q-bg", rgba(document.getElementById("qColor").value, ba));
+  root.style.setProperty("--a-bg", rgba(document.getElementById("aColor").value, ba));
+
+  // persist
+  localStorage.setItem("ai-dry-theme", JSON.stringify({
+    bg, dark: document.getElementById("bgDark").value,
+    fontFamily: document.getElementById("fontFamily").value,
+    fontSize: document.getElementById("fontSize").value,
+    fontColor: document.getElementById("fontColor").value,
+    qFont: document.getElementById("qFont").value,
+    aFont: document.getElementById("aFont").value,
+    qLedOn: document.getElementById("qLedOn").checked,
+    aLedOn: document.getElementById("aLedOn").checked,
+    qLedColor: document.getElementById("qLedColor").value,
+    aLedColor: document.getElementById("aLedColor").value,
+    qColor: document.getElementById("qColor").value,
+    aColor: document.getElementById("aColor").value,
+    bubAlpha: document.getElementById("bubAlpha").value,
+    bgImage: root.style.getPropertyValue("--bg-image")
+  }));
+}
+
+function setBgImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.documentElement.style.setProperty("--bg-image", `url(${ev.target.result})`);
+    applyTheme();
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearBgImage() {
+  document.documentElement.style.setProperty("--bg-image", "none");
+  applyTheme();
+}
+
+function loadTheme() {
+  const t = JSON.parse(localStorage.getItem("ai-dry-theme") || "{}");
+  if (t.bg) document.getElementById("bgColor").value = t.bg;
+  if (t.dark) document.getElementById("bgDark").value = t.dark;
+  if (t.fontFamily) document.getElementById("fontFamily").value = t.fontFamily;
+  if (t.fontSize) document.getElementById("fontSize").value = t.fontSize;
+  if (t.fontColor) document.getElementById("fontColor").value = t.fontColor;
+  if (t.qFont) document.getElementById("qFont").value = t.qFont;
+  if (t.aFont) document.getElementById("aFont").value = t.aFont;
+  document.getElementById("qLedOn").checked = !!t.qLedOn;
+  document.getElementById("aLedOn").checked = !!t.aLedOn;
+  if (t.qLedColor) document.getElementById("qLedColor").value = t.qLedColor;
+  if (t.aLedColor) document.getElementById("aLedColor").value = t.aLedColor;
+  if (t.qColor) document.getElementById("qColor").value = t.qColor;
+  if (t.aColor) document.getElementById("aColor").value = t.aColor;
+  if (t.bubAlpha) document.getElementById("bubAlpha").value = t.bubAlpha;
+  if (t.bgImage) document.documentElement.style.setProperty("--bg-image", t.bgImage);
+  applyTheme();
+}
+
+function toggleSettings() {
+  const s = document.getElementById("settings");
+  s.style.display = s.style.display === "block" ? "none" : "block";
+}
+
+// ===================== PATH HINT =====================
+function showPathHint() {
+  const isWin = navigator.platform.toLowerCase().includes("win");
+  const path = isWin
+    ? `C:\\Users\\Windows Sucks\\AI-dry\\`
+    : `/data/sda4/AI-dry/`;
+  document.getElementById("pathHint").textContent =
+    `Suggested local folder: ${path}  (export files there)`;
+}
+
+// ===================== PARSING =====================
+function parseFileContent(text) {
+  const lines = text.split(/\r?\n/);
+  let messages = [];
+  let qCount = 0, aCount = 0;
+  // First pass: consecutive QQ lines -> one question, consecutive AA lines -> one answer
+  let cur = null;
+  for (let line of lines) {
+    const trimmed = line.trim();
+    let type = null, body = line;
+    if (trimmed.startsWith(Q_PREFIX)) { type = "q"; body = trimmed.slice(Q_PREFIX.length).trimStart(); qCount++; }
+    else if (trimmed.startsWith(A_PREFIX)) { type = "a"; body = trimmed.slice(A_PREFIX.length).trimStart(); aCount++; }
+
+    if (type && (!cur || cur.type !== type)) {
+      cur = { type, text: body };
+      messages.push(cur);
+    } else if (type) {
+      cur.text += "\n" + body;
+    } else if (cur) {
+      cur.text += "\n" + line;
+    } else if (trimmed) {
+      cur = { type: "q", text: line };
+      messages.push(cur);
+    }
+  }
+  messages.forEach(m => m.text = m.text.trim());
+
+  // If fewer than 2 prefixed lines → best-guess heuristic
+  if (qCount + aCount < 2) {
+    messages = [];
+    let current = null;
+    for (let line of lines) {
+      const t = line.trim();
+      if (!t) {
+        if (current) { messages.push(current); current = null; }
+        continue;
+      }
+      // Heuristic: line ends with ? or starts with Q:/Question → question
+      const isQ = /\?$/.test(t) ||
+                  /^(q(uestion)?[:.\s])/i.test(t) ||
+                  /^(user|human|prompt)[:.\s]/i.test(t);
+      const isA = /^(a(nswer)?[:.\s])/i.test(t) ||
+                  /^(assistant|ai|bot|gpt|claude|response)[:.\s]/i.test(t);
+
+      if (isQ) {
+        if (current) messages.push(current);
+        current = { type: "q", text: t.replace(/^(q(uestion)?|user|human|prompt)[:.\s]+/i, "") };
+      } else if (isA) {
+        if (current) messages.push(current);
+        current = { type: "a", text: t.replace(/^(a(nswer)?|assistant|ai|bot|gpt|claude|response)[:.\s]+/i, "") };
+      } else if (current) {
+        current.text += "\n" + t;
+      } else {
+        // default first block to question
+        current = { type: "q", text: t };
+      }
+    }
+    if (current) messages.push(current);
+
+    // Alternate if still too few structure
+    if (messages.length <= 1 && lines.filter(l => l.trim()).length > 1) {
+      messages = [];
+      let flip = true;
+      let buf = [];
+      for (let line of lines) {
+        const t = line.trim();
+        if (!t) {
+          if (buf.length) {
+            messages.push({ type: flip ? "q" : "a", text: buf.join("\n") });
+            buf = [];
+            flip = !flip;
+          }
+        } else buf.push(t);
+      }
+      if (buf.length) messages.push({ type: flip ? "q" : "a", text: buf.join("\n") });
+    }
+  }
+  return messages;
+}
+
+// ===================== UI RENDER =====================
+function renderSidebar() {
+  const list = document.getElementById("convList");
+  list.innerHTML = "";
+  const all = Object.values(conversations).sort((a, b) => b.created - a.created);
+  const names = folders.slice();
+  if (all.some(c => !folders.includes(c.folder))) names.push("");
+  names.forEach(fn => {
+    const items = all.filter(c => (folders.includes(c.folder) ? c.folder : "") === fn);
+    const closed = foldClosed.has(fn);
+    const h = document.createElement("div");
+    h.className = "fold" + (fn === currentFolder ? " cur" : "");
+    h.innerHTML = `<span class="arr">${closed ? "▸" : "▾"}</span><span class="fn">${escapeHtml(fn || "Unfiled")}</span><span class="cnt">${items.length}</span><span class="fx">Exp</span>`;
+    h.querySelector(".arr").onclick = e => { e.stopPropagation(); closed ? foldClosed.delete(fn) : foldClosed.add(fn); saveFolders(); renderSidebar(); };
+    h.querySelector(".fx").onclick = e => { e.stopPropagation(); exportFolder(fn); };
+    h.onclick = () => { if (fn) { currentFolder = fn; saveFolders(); renderSidebar(); } };
+    list.appendChild(h);
+    if (closed) return;
+    items.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "conv-item indent" + (c.id === currentId ? " active" : "");
+      div.innerHTML = `<span class="nm">${escapeHtml(c.name)}</span><span class="acts"><span class="ren">Ren</span><span class="mov">Mov</span><span class="del">Del</span></span>`;
+      div.querySelector(".ren").onclick = e => { e.stopPropagation(); renameConv(c.id); };
+      div.querySelector(".mov").onclick = e => { e.stopPropagation(); moveConv(c.id); };
+      div.querySelector(".del").onclick = e => { e.stopPropagation(); removeConv(c.id); };
+      div.onclick = () => loadConversation(c.id);
+      list.appendChild(div);
+    });
+  });
+}
+let lastRenderedId = null;
+function renderMessages() {
+  const area = document.getElementById("messages");
+  const keep = area.scrollTop;
+  const same = lastRenderedId === currentId;
+  if (!same) selected.clear();
+  lastRenderedId = currentId;
+  area.innerHTML = "";
+  if (!currentId || !conversations[currentId]) return;
+  const msgs = conversations[currentId].messages;
+  msgs.forEach((m, idx) => {
+    const div = document.createElement("div");
+    div.className = "bubble " + m.type + (selected.has(idx) ? " sel" : "");
+    div.dataset.idx = idx;
+    div.innerHTML = `<div class="label">${m.type === "q" ? "Question" : "Answer"}</div><div class="content">${renderRich(m.text)}</div><div class="tools"><button onclick="editBubble(${idx})">Edit</button><button onclick="addBubble('q',${idx})">+Q below</button><button onclick="addBubble('a',${idx})">+A below</button><button onclick="openPaste(${idx},'above')">Paste above</button><button onclick="openPaste(${idx},'below')">Paste below</button><button onclick="deleteBubble(${idx})">Del</button></div>`;
+    area.appendChild(div);
+  });
+  area.scrollTop = same ? keep : area.scrollHeight;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;");
+}
+
+// ===================== CONVERSATION MGMT =====================
+async function addConversation(name, messages) {
+  const id = "c" + Date.now() + Math.random().toString(36).slice(2,7);
+  const conv = { id, name, messages, created: Date.now(), folder: currentFolder };
+  conversations[id] = conv;
+  await saveConv(conv);
+  currentId = id;
+  renderSidebar();
+  renderMessages();
+  return id;
+}
+
+async function loadConversation(id) {
+  currentId = id;
+  renderSidebar();
+  renderMessages();
+}
+
+async function removeConv(id) {
+  if (!confirm("Delete this conversation?")) return;
+  await deleteConv(id);
+  delete conversations[id];
+  if (currentId === id) {
+    currentId = null;
+    document.getElementById("messages").innerHTML = "";
+  }
+  renderSidebar();
+}
+
+function newEmptyConv() {
+  const name = prompt("Name for new conversation:", "Untitled " + new Date().toLocaleString());
+  if (!name) return;
+  addConversation(name, []);
+}
+
+// ===================== FILE UPLOAD =====================
+document.getElementById("fileInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const name = prompt("Name this conversation:", file.name.replace(/\.[^.]+$/, ""));
+  if (!name) { e.target.value = ""; return; }
+
+  // Optional: ask for custom prefixes
+  const custom = prompt(
+    `Prefixes (Question,Answer) – leave blank for defaults "${DEFAULT_Q_PREFIX},${DEFAULT_A_PREFIX}"`,
+    `${Q_PREFIX},${A_PREFIX}`
+  );
+  if (custom) {
+    const parts = custom.split(",").map(s => s.trim());
+    if (parts[0]) Q_PREFIX = parts[0];
+    if (parts[1]) A_PREFIX = parts[1];
+  }
+
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const text = ev.target.result;
+    const messages = parseFileContent(text);
+    await addConversation(name, messages);
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+
+// ===================== MULTI-SELECT / MERGE / EDIT =====================
+let selectMode = false;
+let selected = new Set();
+let painting = null;
+const msgBox = document.getElementById("messages");
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  document.body.classList.toggle("selmode", selectMode);
+  document.getElementById("selModeBtn").classList.toggle("on", selectMode);
+  if (!selectMode) { selected.clear(); renderMessages(); }
+}
+
+function setSel(b, on) {
+  const i = +b.dataset.idx;
+  on ? selected.add(i) : selected.delete(i);
+  b.classList.toggle("sel", on);
+}
+
+// click or click-drag across bubbles to highlight (Select Mode ON, or Ctrl/Shift+click)
+msgBox.addEventListener("mousedown", e => {
+  if (e.button !== 0 || e.target.closest("button, textarea")) return;
+  const b = e.target.closest(".bubble");
+  if (!b || !(selectMode || e.ctrlKey || e.shiftKey || e.metaKey)) return;
+  painting = !selected.has(+b.dataset.idx);
+  setSel(b, painting);
+});
+msgBox.addEventListener("mouseover", e => {
+  if (painting === null) return;
+  const b = e.target.closest(".bubble");
+  if (b) setSel(b, painting);
+});
+document.addEventListener("mouseup", () => { painting = null; });
+// plain click on a bubble toggles its highlight (Select Mode and Ctrl/Shift are handled by mousedown above)
+msgBox.addEventListener("click", e => {
+  if (selectMode || e.ctrlKey || e.shiftKey || e.metaKey) return;
+  if (e.target.closest("button, textarea")) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  const b = e.target.closest(".bubble");
+  if (!b || b.classList.contains("editing")) return;
+  setSel(b, !selected.has(+b.dataset.idx));
+});
+// right click / long-press menu
+msgBox.addEventListener("contextmenu", e => {
+  const b = e.target.closest(".bubble");
+  if (!b) return;
+  e.preventDefault();
+  if (!selected.has(+b.dataset.idx)) setSel(b, true);
+  const m = document.getElementById("ctxMenu");
+  m.style.display = "flex";
+  m.style.left = Math.min(e.clientX, window.innerWidth - 200) + "px";
+  m.style.top = Math.min(e.clientY, window.innerHeight - 190) + "px";
+});
+document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu")) hideCtx(); });
+function hideCtx() { document.getElementById("ctxMenu").style.display = "none"; }
+
+function mergeSelected(type) {
+  if (!currentId || !selected.size) return;
+  const conv = conversations[currentId];
+  const idxs = [...selected].sort((a, b) => a - b);
+  const text = idxs.map(i => conv.messages[i].text).join("\n");
+  conv.messages[idxs[0]] = { type, text };
+  for (let k = idxs.length - 1; k > 0; k--) conv.messages.splice(idxs[k], 1);
+  selected.clear(); saveConv(conv); renderMessages(); hideCtx();
+}
+
+function deleteSelected() {
+  if (!currentId || !selected.size) return;
+  if (!confirm("Delete " + selected.size + " selected box(es)?")) return;
+  const conv = conversations[currentId];
+  [...selected].sort((a, b) => b - a).forEach(i => conv.messages.splice(i, 1));
+  selected.clear(); saveConv(conv); renderMessages(); hideCtx();
+}
+
+function clearSelection() { selected.clear(); renderMessages(); hideCtx(); }
+
+function editBubble(i) {
+  const b = document.querySelector(`.bubble[data-idx="${i}"]`);
+  if (!b) return;
+  const m = conversations[currentId].messages[i];
+  b.querySelector(".content").innerHTML = `<textarea>${escapeHtml(m.text)}</textarea>`;
+  b.querySelector(".tools").innerHTML = `<button onclick="saveEdit(${i})">Save</button><button onclick="renderMessages()">Cancel</button>`;
+  b.classList.add("editing");
+  b.scrollIntoView({ block: "center" });
+  b.querySelector("textarea").focus();
+}
+
+function saveEdit(i) {
+  const conv = conversations[currentId];
+  conv.messages[i].text = document.querySelector(`.bubble[data-idx="${i}"] textarea`).value;
+  saveConv(conv); renderMessages();
+}
+
+function deleteBubble(i) {
+  const conv = conversations[currentId];
+  conv.messages.splice(i, 1);
+  selected.clear(); saveConv(conv); renderMessages();
+}
+
+function addBubble(type, after) {
+  if (!currentId) return alert("No conversation selected");
+  const conv = conversations[currentId];
+  const at = after === undefined ? conv.messages.length : after + 1;
+  conv.messages.splice(at, 0, { type, text: "" });
+  selected.clear(); saveConv(conv); renderMessages(); editBubble(at);
+}
+
+// ===================== PASTE CHAT / RICH FORMAT =====================
+function renderRich(text) {
+  return text.split(/(```[^\n]*\n[\s\S]*?```)/).map((part, i) => {
+    if (i % 2) {
+      const m = part.match(/^```([^\n]*)\n([\s\S]*?)\n?```$/);
+      const lang = m ? m[1].trim() : "", code = m ? m[2] : part;
+      return `<button class="cp" onclick="copyCode(this)">Copy${lang ? " " + escapeHtml(lang) : ""}</button><pre><code>${escapeHtml(code)}</code></pre>`;
+    }
+    return escapeHtml(part)
+      .replace(/`([^`\n]+)`/g, '<code class="inl">$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  }).join("");
+}
+
+function copyCode(btn) {
+  const t = btn.nextElementSibling.textContent;
+  const done = () => { const o = btn.textContent; btn.textContent = "Copied"; setTimeout(() => btn.textContent = o, 1000); };
+  const fb = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); };
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, fb); else fb();
+}
+
+function htmlToMd(root) {
+  let out = "";
+  function kids(n, c) { n.childNodes.forEach(k => walk(k, c)); }
+  function walk(n, c) {
+    if (n.nodeType === 3) {
+      let s = n.nodeValue.replace(/\s+/g, " ");
+      if (!s.trim()) { if (out && !/\n$/.test(out)) out += " "; return; }
+      if (!out || /(\n|- |\d\. )$/.test(out)) s = s.replace(/^ /, "");
+      out += s;
+      return;
+    }
+    if (n.nodeType !== 1) return;
+    const t = n.tagName.toUpperCase();
+    if (/^(SCRIPT|STYLE|BUTTON|SVG|NOSCRIPT)$/.test(t)) return;
+    if (t === "BR") { out += "\n"; return; }
+    if (t === "PRE") {
+      const code = n.querySelector("code");
+      const m = code && code.className.match(/language-([\w+#-]+)/);
+      out += "\n```" + (m ? m[1] : "") + "\n" + n.textContent.replace(/\n$/, "") + "\n```\n";
+      return;
+    }
+    if (t === "CODE") { out += "`" + n.textContent + "`"; return; }
+    if (t === "STRONG" || t === "B") { out += "**"; kids(n, c); out += "**"; return; }
+    if (t === "EM" || t === "I") { out += "*"; kids(n, c); out += "*"; return; }
+    if (/^H[1-6]$/.test(t)) { out += "\n" + "#".repeat(+t[1]) + " "; kids(n, c); out += "\n"; return; }
+    if (t === "UL" || t === "OL") { kids(n, { d: c.d + 1, ol: t === "OL", n: 1 }); out += "\n"; return; }
+    if (t === "LI") { out += "\n" + "  ".repeat(Math.max(0, c.d - 1)) + (c.ol ? (c.n++) + ". " : "- "); kids(n, c); return; }
+    if (t === "TD" || t === "TH") { kids(n, c); out += " | "; return; }
+    if (t === "TR") { out += "\n"; kids(n, c); return; }
+    if (/^(P|DIV|TABLE|BLOCKQUOTE|SECTION|ARTICLE|HR)$/.test(t)) { out += "\n"; kids(n, c); out += "\n"; return; }
+    kids(n, c);
+  }
+  walk(root, { d: 0, ol: false, n: 1 });
+  return out.split(/(```[\s\S]*?```)/).map((p, i) => i % 2 ? p :
+    p.replace(/[ \t]+\n/g, "\n").replace(/^(\s*(?:- |\d+\. ))\n+/gm, "$1").replace(/\n{3,}/g, "\n\n")).join("").trim();
+}
+
+function chatLabel(line) {
+  const t = line.trim();
+  if (t.startsWith(Q_PREFIX)) return { type: "q", body: t.slice(Q_PREFIX.length).trimStart() };
+  if (t.startsWith(A_PREFIX)) return { type: "a", body: t.slice(A_PREFIX.length).trimStart() };
+  let m = t.match(/^(?:Q|Question|You said|You|User|Human|Prompt)\s*:\s*(.*)$/i);
+  if (m) return { type: "q", body: m[1] };
+  m = t.match(/^(?:A|Answer|Claude said|Claude|Assistant|ChatGPT said|ChatGPT|GPT|AI|Bot|Response)\s*:\s*(.*)$/i);
+  if (m) return { type: "a", body: m[1] };
+  return null;
+}
+
+function parseChat(text, html, qBlocks) {
+  // 1) structured HTML (role attributes on the copied elements)
+  if (html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const sel = '[data-testid="user-message"], .font-claude-response, .font-claude-message, [data-message-author-role]';
+    const els = [...doc.querySelectorAll(sel)].filter(el => !el.parentElement.closest(sel));
+    if (els.length >= 2) {
+      return els.map(el => {
+        const role = el.getAttribute("data-message-author-role");
+        const isQ = role ? role === "user" : el.matches('[data-testid="user-message"]');
+        return { type: isQ ? "q" : "a", text: htmlToMd(el) };
+      }).filter(m => m.text);
+    }
+    // 2) rich HTML without role markers: keep formatting as markdown
+    if (/<(pre|code|h[1-6]|li|strong|table)\b/i.test(html)) text = htmlToMd(doc.body) || text;
+  }
+
+  // 3) labeled lines (QQ/AA, You said:, Claude said:, User:, Assistant:, Q:, A: ...)
+  const lines = text.split(/\r?\n/);
+  const msgs = [];
+  let cur = null, fence = false, labels = 0;
+  for (const line of lines) {
+    const isFence = /^\s*```/.test(line);
+    if (isFence) fence = !fence;
+    const lab = (fence || isFence) ? null : chatLabel(line);
+    if (lab) {
+      labels++;
+      if (!cur || cur.type !== lab.type) { cur = { type: lab.type, text: lab.body }; msgs.push(cur); }
+      else cur.text += "\n" + lab.body;
+    } else if (cur) {
+      cur.text += "\n" + line;
+    } else if (line.trim()) {
+      cur = { type: "q", text: line }; msgs.push(cur);
+    }
+  }
+  if (labels) { msgs.forEach(m => m.text = m.text.trim()); return msgs.filter(m => m.text); }
+
+  // 4) unlabeled: first N blank-line blocks = question, the rest = answer
+  const blocks = []; let buf = []; fence = false;
+  for (const l of lines) {
+    if (/^\s*```/.test(l)) fence = !fence;
+    if (!fence && !l.trim()) { if (buf.length) { blocks.push(buf.join("\n")); buf = []; } }
+    else buf.push(l);
+  }
+  if (buf.length) blocks.push(buf.join("\n"));
+  const n = Math.max(1, qBlocks || 1);
+  const out = [{ type: "q", text: blocks.slice(0, n).join("\n\n").trim() }];
+  if (blocks.length > n) out.push({ type: "a", text: blocks.slice(n).join("\n\n").trim() });
+  return out.filter(m => m.text);
+}
+
+const pasteTa = document.getElementById("pasteText");
+let pastedHtml = "";
+pasteTa.addEventListener("paste", e => {
+  const cd = e.clipboardData;
+  if (!cd) return;
+  e.preventDefault();
+  pastedHtml = cd.getData("text/html") || "";
+  pasteTa.value = cd.getData("text/plain");
+});
+pasteTa.addEventListener("input", () => { pastedHtml = ""; });
+
+let pasteAnchor = null;
+function openPaste(idx, pos) {
+  pastedHtml = ""; pasteTa.value = "";
+  pasteAnchor = (idx === undefined) ? null : idx;
+  document.getElementById("pasteMode").value = pos || "new";
+  document.getElementById("pasteName").value = "Pasted " + new Date().toLocaleString();
+  document.getElementById("pasteModal").style.display = "flex";
+  pasteTa.focus();
+}
+function closePaste() { document.getElementById("pasteModal").style.display = "none"; }
+
+async function importPaste() {
+  if (!pasteTa.value.trim() && !pastedHtml) return;
+  const n = parseInt(document.getElementById("pasteQBlocks").value) || 1;
+  const msgs = parseChat(pasteTa.value, pastedHtml, n);
+  if (!msgs.length) return alert("Nothing recognized");  const mode = document.getElementById("pasteMode").value;
+  if (mode !== "new") {
+    if (!currentId) return alert("No conversation selected");
+    const conv = conversations[currentId];
+    let at = null;
+    if (mode === "above" || mode === "below") {
+      let a = pasteAnchor;
+      if (a === null && selected.size) a = mode === "above" ? Math.min(...selected) : Math.max(...selected);
+      if (a === null) return alert("Click a bubble to select it first, or use its Paste above / Paste below button");
+      at = mode === "above" ? a : a + 1;
+      conv.messages.splice(at, 0, ...msgs);
+    } else if (mode === "top") conv.messages.unshift(...msgs);
+    else conv.messages.push(...msgs);
+    pasteAnchor = null;
+    selected.clear();
+    await saveConv(conv);
+    renderMessages();
+    const area = document.getElementById("messages");
+    if (at !== null) {
+      const nb = area.querySelector(`.bubble[data-idx="${at}"]`);
+      if (nb) nb.scrollIntoView({ block: "center" });
+    } else area.scrollTop = mode === "top" ? 0 : area.scrollHeight;
+  } else {
+    await addConversation(document.getElementById("pasteName").value || "Pasted chat", msgs);
+  }
+  closePaste();
+}
+
+// ===================== RENAME / COLLAPSE =====================
+async function renameConv(id) {
+  if (!id || !conversations[id]) return alert("No conversation selected");
+  const c = conversations[id];
+  const name = prompt("Rename conversation:", c.name);
+  if (!name || !name.trim()) return;
+  c.name = name.trim();
+  await saveConv(c);
+  renderSidebar();
+}
+
+function toggleDeck() {
+  const off = document.body.classList.toggle("deck-off");
+  document.getElementById("deckToggle").textContent = off ? "Deck ▸" : "Deck ▾";
+  localStorage.setItem("ai-dry-deck-off", off ? "1" : "");
+}
+
+function toggleSidebar() {
+  const off = document.body.classList.toggle("sb-off");
+  localStorage.setItem("ai-dry-sb-off", off ? "1" : "");
+}
+
+if (localStorage.getItem("ai-dry-deck-off")) {
+  document.body.classList.add("deck-off");
+  document.getElementById("deckToggle").textContent = "Deck ▸";
+}
+if (localStorage.getItem("ai-dry-sb-off")) document.body.classList.add("sb-off");
+
+// ===================== FOLDERS =====================
+const DEFAULT_FOLDERS = ["Gr0k", "Ch@tGPT", "Cl@ude", "C0pilot", "Go0gle"];
+let folders = JSON.parse(localStorage.getItem("ai-dry-folders") || "null") || DEFAULT_FOLDERS.slice();
+let currentFolder = localStorage.getItem("ai-dry-folder") || folders[0];
+let foldClosed = new Set(JSON.parse(localStorage.getItem("ai-dry-fclosed") || "[]"));
+
+function saveFolders() {
+  localStorage.setItem("ai-dry-folders", JSON.stringify(folders));
+  localStorage.setItem("ai-dry-folder", currentFolder);
+  localStorage.setItem("ai-dry-fclosed", JSON.stringify([...foldClosed]));
+}
+
+function addFolder() {
+  const n = (prompt("New folder name:") || "").trim();
+  if (!n || folders.includes(n)) return;
+  folders.push(n);
+  currentFolder = n;
+  saveFolders();
+  renderSidebar();
+}
+
+async function moveConv(id) {
+  const c = conversations[id];
+  if (!c) return;
+  const pick = prompt("Move to folder (number):\n" + folders.map((f, i) => (i + 1) + ". " + f).join("\n"), String(folders.indexOf(c.folder) + 1 || 1));
+  const f = folders[parseInt(pick) - 1];
+  if (!f) return;
+  c.folder = f;
+  await saveConv(c);
+  renderSidebar();
+}
+
+function exportFolder(fn) {
+  const arr = Object.values(conversations).filter(c => (folders.includes(c.folder) ? c.folder : "") === fn);
+  if (!arr.length) return alert("Folder is empty");
+  downloadJSON(arr, "AI-dry-" + (fn || "Unfiled") + ".json");
+}
+// ===================== PORTABLE BACKUP / RESTORE =====================
+async function gzipText(str) {
+  const cs = new CompressionStream("gzip");
+  const w = cs.writable.getWriter();
+  w.write(new TextEncoder().encode(str));
+  w.close();
+  return new Response(cs.readable).blob();
+}
+
+async function gunzipBuf(buf) {
+  const ds = new DecompressionStream("gzip");
+  const w = ds.writable.getWriter();
+  w.write(buf);
+  w.close();
+  return new Response(ds.readable).text();
+}
+
+async function backupAll() {
+  const bundle = {
+    app: "AI-dry",
+    version: 1,
+    exported: new Date().toISOString(),
+    conversations: Object.values(conversations),
+    folders: folders,
+    currentFolder: currentFolder,
+    foldClosed: [...foldClosed],
+    theme: localStorage.getItem("ai-dry-theme") || "",
+    deckOff: localStorage.getItem("ai-dry-deck-off") || "",
+    sbOff: localStorage.getItem("ai-dry-sb-off") || ""
+  };
+  const json = JSON.stringify(bundle);
+  const stamp = new Date().toISOString().slice(0, 10);
+  let blob, name;
+  if (typeof CompressionStream === "function") {
+    blob = await gzipText(json);
+    name = "AI-dry-backup-" + stamp + ".json.gz";
+  } else {
+    blob = new Blob([json], { type: "application/json" });
+    name = "AI-dry-backup-" + stamp + ".json";
+    alert("This browser has no compression support. Saving uncompressed.");
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+document.getElementById("restoreInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  let data;
+  try {
+    const buf = await file.arrayBuffer();
+    const u = new Uint8Array(buf);
+    const text = (u[0] === 0x1f && u[1] === 0x8b) ? await gunzipBuf(buf) : new TextDecoder().decode(buf);
+    data = JSON.parse(text);
+  } catch (err) {
+    return alert("Could not read this file: " + err.message);
+  }
+  if (Array.isArray(data)) data = { conversations: data };
+  else if (data && Array.isArray(data.messages)) data = { conversations: [data] };
+  if (!data || !Array.isArray(data.conversations)) return alert("Not an AI-dry backup file");
+
+  const mode = (prompt(
+    data.conversations.length + " conversation(s) in this file.\n\nType R = REPLACE everything here (clean slate, erases current data and settings)\nType M = MERGE into what is already here",
+    "M"
+  ) || "").trim().toUpperCase();
+  if (mode !== "R" && mode !== "M") return;
+
+  const incoming = data.conversations.map(c => {
+    if (!c.id) c.id = "c" + Date.now() + Math.random().toString(36).slice(2, 7);
+    if (!Array.isArray(c.messages)) c.messages = [];
+    if (!c.created) c.created = Date.now();
+    if (!c.name) c.name = "Imported";
+    return c;
+  });
+
+  if (mode === "R") {
+    for (const id of Object.keys(conversations)) await deleteConv(id);
+    conversations = {};
+    for (const c of incoming) { await saveConv(c); conversations[c.id] = c; }
+    localStorage.setItem("ai-dry-folders", JSON.stringify(data.folders || DEFAULT_FOLDERS));
+    localStorage.setItem("ai-dry-folder", data.currentFolder || (data.folders || DEFAULT_FOLDERS)[0]);
+    localStorage.setItem("ai-dry-fclosed", JSON.stringify(data.foldClosed || []));
+    localStorage.setItem("ai-dry-theme", data.theme || "{}");
+    localStorage.setItem("ai-dry-deck-off", data.deckOff || "");
+    localStorage.setItem("ai-dry-sb-off", data.sbOff || "");
+    location.reload();
+    return;
+  }
+
+  let added = 0, skipped = 0, first = null;
+  for (const c of incoming) {
+    if (conversations[c.id]) { skipped++; continue; }
+    await saveConv(c);
+    conversations[c.id] = c;
+    if (!first) first = c.id;
+    added++;
+  }
+  (data.folders || []).forEach(f => { if (!folders.includes(f)) folders.push(f); });
+  incoming.forEach(c => { if (c.folder && !folders.includes(c.folder)) folders.push(c.folder); });
+  saveFolders();
+  renderSidebar();
+  if (first) loadConversation(first);
+  alert("Merged " + added + " conversation(s). Skipped " + skipped + " already present.");
+});
+
+// ===================== SELECTION → SPLIT =====================
+let lastSelection = null;
+
+document.getElementById("messages").addEventListener("mouseup", e => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+    hideSelToolbar();
+    return;
+  }
+  // only inside a bubble
+  let node = sel.anchorNode;
+  while (node && !node.classList?.contains("bubble")) node = node.parentElement;
+  if (!node) { hideSelToolbar(); return; }
+
+  lastSelection = {
+    text: sel.toString(),
+    bubbleIdx: parseInt(node.dataset.idx),
+    range: sel.getRangeAt(0)
+  };
+
+  const toolbar = document.getElementById("selToolbar");
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  toolbar.style.display = "flex";
+  toolbar.style.left = (rect.left + window.scrollX) + "px";
+  toolbar.style.top = (rect.bottom + window.scrollY + 6) + "px";
+});
+
+function hideSelToolbar() {
+  document.getElementById("selToolbar").style.display = "none";
+  lastSelection = null;
+}
+
+function splitSelection(type) {
+  if (!lastSelection || !currentId) return;
+  const conv = conversations[currentId];
+  const idx = lastSelection.bubbleIdx;
+  const orig = conv.messages[idx];
+  const selected = lastSelection.text;
+
+  // Simple split: everything before selection stays, selection becomes new bubble of chosen type,
+  // everything after becomes another bubble of original type (if any)
+  const full = orig.text;
+  const pos = full.indexOf(selected);
+  if (pos === -1) { hideSelToolbar(); return; }
+
+  const before = full.slice(0, pos).trim();
+  const after = full.slice(pos + selected.length).trim();
+
+  const newMsgs = [];
+  if (before) newMsgs.push({ type: orig.type, text: before });
+  newMsgs.push({ type: type, text: selected.trim() });
+  if (after) newMsgs.push({ type: orig.type, text: after });
+
+  conv.messages.splice(idx, 1, ...newMsgs);
+  saveConv(conv);
+  renderMessages();
+  hideSelToolbar();
+}
+
+// ===================== SEARCH (grep style) =====================
+function doSearch() {
+  const q = document.getElementById("searchBox").value.trim();
+  if (!q) return;
+  const hits = [];
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+
+  Object.values(conversations).forEach(conv => {
+    conv.messages.forEach((m, mi) => {
+      const lines = m.text.split(/\r?\n/);
+      lines.forEach((line, li) => {
+        if (re.test(line)) {
+          const start = Math.max(0, li - 3);
+          const end = Math.min(lines.length - 1, li + 3);
+          const context = [];
+          for (let i = start; i <= end; i++) {
+            let l = escapeHtml(lines[i]);
+            if (i === li) l = l.replace(re, m => `<mark>${m}</mark>`);
+            context.push((i === li ? ">>> " : "    ") + l);
+          }
+          hits.push({
+            convName: conv.name,
+            convId: conv.id,
+            type: m.type,
+            context: context.join("\n")
+          });
+        }
+        re.lastIndex = 0;
+      });
+    });
+  });
+
+  const box = document.getElementById("searchHits");
+  box.innerHTML = hits.length
+    ? hits.map(h => `
+      <div class="search-hit">
+        <div class="meta">${escapeHtml(h.convName)} · ${h.type.toUpperCase()}
+          <button style="float:right;padding:2px 8px;font-size:11px"
+            onclick="loadConversation('${h.convId}');closeSearch()">Open</button>
+        </div>
+        <pre style="white-space:pre-wrap;font-size:13px;margin:0">${h.context}</pre>
+      </div>`).join("")
+    : "<p>No matches found.</p>";
+
+  document.getElementById("searchModal").style.display = "flex";
+}
+
+function closeSearch() {
+  document.getElementById("searchModal").style.display = "none";
+}
+
+// ===================== EXPORT =====================
+function exportCurrent() {
+  if (!currentId) return alert("No conversation selected");
+  const c = conversations[currentId];
+  downloadJSON(c, c.name + ".json");
+}
+
+function exportAll() {
+  downloadJSON(Object.values(conversations), "AI-dry-all-conversations.json");
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Also support loading previously exported JSON
+document.getElementById("fileInput").addEventListener("change", function(){}, true); // already handled
+
+// ===================== INIT =====================
+(async function init() {
+  await openDB();
+  const all = await loadAll();
+  all.forEach(c => conversations[c.id] = c);
+  buildPalettes();
+  loadTheme();
+  showPathHint();
+  renderSidebar();
+  if (Object.keys(conversations).length) {
+    currentId = Object.keys(conversations).sort((a,b)=>conversations[b].created-conversations[a].created)[0];
+    renderMessages();
+  }
+})();
+</script>
+</body>
+</html>
